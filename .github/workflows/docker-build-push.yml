@@ -19,7 +19,7 @@ on:
   #   branches: [ main ]
 env:
   REGISTRY: ghcr.io
-  IMAGE_NAME: mattvonrocketstein/py-mcmas
+  IMAGE_NAME: mattvonrocketstein/mk.parse
 
 jobs:
   build-and-push:

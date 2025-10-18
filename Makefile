@@ -27,7 +27,7 @@ init: py.init py.pkg.install/test
 # smoke-test: mkp.dispatch/self.smoke_test
 # self.smoke_test:
 dexec=docker run -v `pwd`:/workspace -w /workspace \
-		--entrypoint /opt/mkp/py-mkp.py ${img} $${args:-} Makefile | ${jq} .
+		${img} $${args:-} Makefile | ${jq} .
 test: 
 	${dexec}
 	args='--locals' ${dexec}

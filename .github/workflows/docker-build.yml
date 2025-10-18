@@ -18,4 +18,4 @@ jobs:
         with:
           submodules: recursive
       - name: Build
-        run: make docker.pymcmas.build docker.pymcmas.test
+        run: make build test
