@@ -7,4 +7,4 @@ RUN apt-get update -y -qq && apt-get install -y -qq procps make curl tree
 COPY mk.parse.py /usr/local/bin/mk.parse
 RUN /usr/local/bin/mk.parse --help
 COPY --from=charmcli/glow:v1.5.1 /usr/local/bin/glow /usr/local/bin/glow
-ENTRYPOINT ["/usr/local/bin/mk.parse","targets"]
+ENTRYPOINT ["/usr/local/bin/mk.parse"]

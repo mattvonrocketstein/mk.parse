@@ -4,24 +4,21 @@
 #   "click","jinja2","rich",
 # ]
 # ///
-import sys
-import json
-import typing
 import os
 import re
-import click
+import json
+import typing
 import logging
 import tempfile
-
 from pathlib import Path
-from rich.console import Console 
-from rich.logging import RichHandler
-# from jinja2 import Environment, Template, UndefinedError
-from jinja2 import FileSystemLoader, StrictUndefined
 
-import jinja2  # noqa
+import click
+import jinja2
+from rich.console import Console
+from rich.logging import RichHandler
+
 # parser = parse
-help_t="""
+help_t = """
 [`{{target}}`](#) *(via {{file}}:{{lineno}})*
 
 {%if prereqs and not interpolated%}
@@ -39,15 +36,16 @@ No documentation available.
 -----------------------
 """
 
-stderr=CONSOLE = Console(stderr=True)
+stderr = CONSOLE = Console(stderr=True)
 _recipe_pattern = "#  recipe to execute (from '"
 _variables_pattern = "# Variables"
 _ht_stats_pattern = "# files hash-table stats:"
 
+
 def get_logger(name, console=stderr):
     log_handler = RichHandler(
         rich_tracebacks=True,
-        console=stderr,
+        console=console,
         show_time=False,
     )
 
@@ -68,16 +66,20 @@ def get_logger(name, console=stderr):
 
     # FIXME: get this from some kind of global config
     # logger.setLevel("DEBUG")
-    logger.setLevel('info'.upper())
+    logger.setLevel("info".upper())
 
     return logger
+
+
 LOGGER = get_logger(__name__)
 
+
 def json_output(out):
-    print(json.dumps(out,indent=2))
+    print(json.dumps(out, indent=2))
     return out
 
-def validate_makefile(makefile:str):
+
+def validate_makefile(makefile: str):
     assert makefile
     tmp = Path(makefile)
     if not all(
@@ -90,6 +92,7 @@ def validate_makefile(makefile:str):
     else:
         LOGGER.warning(f"parsing makefile @ {makefile}")
 
+
 def _get_prov_line(body):
     """ """
     pline = [x for x in body if _recipe_pattern in x]
@@ -98,8 +101,7 @@ def _get_prov_line(body):
 
 
 def _get_file(body=None, makefile=None):
-    """ WARNING: answers according to make's db, but often still wrong!
-    """
+    """WARNING: answers according to make's db, but often still wrong!"""
     pline = _get_prov_line(body)
     if pline:
         return pline.split(_recipe_pattern)[-1].split("'")[0]
@@ -110,27 +112,15 @@ def _get_file(body=None, makefile=None):
 @click.command()
 @click.argument("makefile")
 def includes(makefile: str = ""):
-    """
-    """
+    """ """
     validate_makefile(makefile)
-    with open(makefile,'r') as fhandle:
-        lines=fhandle.readlines()
-        includes=[line for line in lines if line.startswith('include ')]
-        includes=[line.split()[1:] for line in includes]
+    with open(makefile) as fhandle:
+        lines = fhandle.readlines()
+        includes = [line for line in lines if line.startswith("include ")]
+        includes = [line.split()[1:] for line in includes]
     return json_output(includes)
-    
-@click.command()
-@click.argument("makefile")
-def includes(makefile: str = ""):
-    """
-    """
-    validate_makefile(makefile)
-    with open(makefile,'r') as fhandle:
-        lines=fhandle.readlines()
-        includes=[line for line in lines if line.startswith('include ')]
-        includes=[line.split()[1:] for line in includes]
-    return json_output(includes)
-    
+
+
 def _database(makefile: str = "", make="make") -> typing.List[str]:
     """
     Get database for Makefile
@@ -140,23 +130,60 @@ def _database(makefile: str = "", make="make") -> typing.List[str]:
     LOGGER.critical(f"building database for {makefile}")
     validate_makefile(makefile)
     cmd = f"{make} --print-data-base -pqRrs -f {makefile} > .tmp.mk.db"
-    resp = os.system(cmd)
+    os.system(cmd)
     out = open(".tmp.mk.db").read().split("\n")
     os.remove(".tmp.mk.db")
     return out
-    
+
+
 @click.command()
 @click.option("--target", help="Retrieves help for named target only")
-@click.option("--markdown", is_flag=True, default=False, help="Enriches docs by guessing at markdown formatting")
-@click.option("--body", is_flag=True, default=False, help="Enriches docs by guessing at markdown formatting")
-@click.option("--public", is_flag=True, default=False, help="Filter for public targets only (no prefix in {self|.})")
-@click.option("--private", is_flag=True, default=False, help="Filter for private targets only (prefix in {self|.})")
-@click.option("--locals", is_flag=True, default=False, help="Filter for local targets only (no includes)")
+@click.option(
+    "--markdown",
+    is_flag=True,
+    default=False,
+    help="Enriches docs by guessing at markdown formatting",
+)
+@click.option(
+    "--body",
+    is_flag=True,
+    default=False,
+    help="Enriches docs by guessing at markdown formatting",
+)
+@click.option(
+    "--public",
+    is_flag=True,
+    default=False,
+    help="Filter for public targets only (no prefix in {self|.})",
+)
+@click.option(
+    "--private",
+    is_flag=True,
+    default=False,
+    help="Filter for private targets only (prefix in {self|.})",
+)
+@click.option(
+    "--locals",
+    is_flag=True,
+    default=False,
+    help="Filter for local targets only (no includes)",
+)
 @click.option("--local", is_flag=True, default=False, help="Alias for --locals")
-@click.option("--interpolate", is_flag=True, default=False, help="Interpolate docstrings")
-@click.option("--parametrics", is_flag=True, default=False, help="Filter for parametric-targets only (using '%')")
-@click.option("--preview", is_flag=True, default=False, help="Pretty-printer (implies --markdown)")
-@click.option("--module-docs", is_flag=True, default=False, help="Only return module docs")
+@click.option(
+    "--interpolate", is_flag=True, default=False, help="Interpolate docstrings"
+)
+@click.option(
+    "--parametrics",
+    is_flag=True,
+    default=False,
+    help="Filter for parametric-targets only (using '%')",
+)
+@click.option(
+    "--preview", is_flag=True, default=False, help="Pretty-printer (implies --markdown)"
+)
+@click.option(
+    "--module-docs", is_flag=True, default=False, help="Only return module docs"
+)
 @click.argument("makefile")
 def targets(
     makefile: str = None,
@@ -170,7 +197,6 @@ def targets(
     parametrics: bool = False,
     preview: bool = False,
     markdown: bool = False,
-    include_private: bool = False,
     module_docs: bool = False,
     parse_target_aliases: bool = True,
     **kwargs,
@@ -178,9 +204,10 @@ def targets(
     """
     Parse Makefile to JSON.  Includes targets/prereqs details and documentation.
     """
-    markdown=markdown or preview
-    locals=locals or local
-    body=body or interpolate
+    markdown = markdown or preview
+    locals = locals or local
+    body = body or interpolate
+
     def _enricher(text, pattern):
         """ """
         # raise Exception(text)
@@ -214,8 +241,8 @@ def targets(
         rfmt = [""]
         while docs:
             tmp = docs.pop(0)
-            if any([tmp.lstrip().startswith(x) for x in "* |".split()]) or any(
-                [x in tmp for x in "USAGE: EXAMPLE: ```".split()]
+            if any(tmp.lstrip().startswith(x) for x in "* |".split()) or any(
+                x in tmp for x in "USAGE: EXAMPLE: ```".split()
             ):
                 rfmt = rfmt + [tmp] + docs
                 break
@@ -228,10 +255,10 @@ def targets(
                 rfmt += ["", tmp]
         return rfmt
 
-    assert makefile and os.path.exists(makefile),f'file @ {makefile} does not exist'
+    assert makefile and os.path.exists(makefile), f"file @ {makefile} does not exist"
     db = _database(makefile, **kwargs)
     raw_content = open(makefile).read()
-    original = raw_content.split('\n')
+    original = raw_content.split("\n")
     variables_start = db.index(_variables_pattern)
     variables_end = db.index("", variables_start + 2)
     # vars = db[variables_start:variables_end]
@@ -255,10 +282,7 @@ def targets(
     targets = [t for t in targets if t != f"{makefile}:"]
     for tline in targets:
         if any(
-            [
-                tline.startswith(" ") or tline.startswith(x)
-                for x in "$ @ & \t".split(" ")
-            ]
+            tline.startswith(" ") or tline.startswith(x) for x in "$ @ & \t".split(" ")
         ):
             continue
         bits = tline.split(":")
@@ -270,10 +294,15 @@ def targets(
         line_end = db.index("", line_start)
         target_body = db[line_start:line_end]
         pline = _get_prov_line(target_body)
-        file = _get_file(body=target_body, makefile=makefile,)
+        file = _get_file(
+            body=target_body,
+            makefile=makefile,
+        )
         # file can still be wrong in the makefile database, depends how include happened..
-        if file==makefile and not re.findall(f'^{target_name}:.*', raw_content, re.MULTILINE):
-            file=None
+        if file == makefile and not re.findall(
+            f"^{target_name}:.*", raw_content, re.MULTILINE
+        ):
+            file = None
         if pline:
             # take advice from make's database.
             # we return this because it's authoritative,
@@ -290,19 +319,19 @@ def targets(
                 lineno = None
         lineno = lineno and (int(lineno) - 1)
         prereqs = [x for x in childs.split() if x.strip()]
-        header=target_body.pop(0)
-        target_body = [b.lstrip() for b in target_body if not b.startswith('#  ')]
-        out[target_name] = dict(
-            file=file,
-            lineno=lineno,
-            header=header,
-            body=target_body,
-            parametric='%' in target_name,
-            chain=None,
-            type=type,
-            docs=[x[len("\t@#") :] for x in target_body if x.startswith("\t@#")],
-            prereqs=list(set(prereqs)),
-        )
+        header = target_body.pop(0)
+        target_body = [b.lstrip() for b in target_body if not b.startswith("#  ")]
+        out[target_name] = {
+            "file": file,
+            "lineno": lineno,
+            "header": header,
+            "body": target_body,
+            "parametric": "%" in target_name,
+            "chain": None,
+            "type": type,
+            "docs": [x[len("\t@#") :] for x in target_body if x.startswith("\t@#")],
+            "prereqs": list(set(prereqs)),
+        }
         if type == "implicit":
             regex = target_name.replace("%", ".*")
             out[target_name].update(regex=regex)
@@ -350,42 +379,31 @@ def targets(
                         if not line2:
                             docs[i + j] = line2 + "```\n"
                             break
-            zmd=zip_markdown(docs)
-            out[target_name]["docs"] = [] if zmd==[""] else zmd
-    ALL=out.copy()
-    # user requested only parametrics
-    if parametrics:
-        LOGGER.warning("Excluding non-parametric targets..")
-        out = {k:v for k,v in out.items() if v['parametric']==True}
-    
-    # user requested no target-bodies should be provided
-    if not body:
-        out = {k:{kk:vv for kk,vv in v.items() if kk not in 'body header'.split()} for k,v in out.items() }
-    #     tmp = {}
-    #     for k, v in out.items():
-    #         # v.pop("body", [])
-    #         out[k].pop('body',None) #= v
-    #     out = tmp
+            zmd = zip_markdown(docs)
+            out[target_name]["docs"] = [] if zmd == [""] else zmd
+    ALL = out.copy()
 
-    # user requested private-targets should not be included
-    # if not include_private:
-    #     LOGGER.warning("Excluding the private-targets..")
-    #     tmp = {}
-    #     for k, v in out.items():
-    #         if not k.startswith("."):
-    #             tmp[k] = v
-    #     out = tmp
-    # else:
-    #     LOGGER.warning("Including private-targets..")
-    
+    # filter: user requested only parametrics
+    if parametrics:
+        LOGGER.info("Excluding non-parametric targets..")
+        out = {k: v for k, v in out.items() if v.get("parametric", False) is True}
+
+    # filter: user requested no target-bodies should be provided
+    if not body:
+        out = {
+            k: {kk: vv for kk, vv in v.items() if kk not in "body header".split()}
+            for k, v in out.items()
+        }
+
+    # filter: only local targets
     if locals:
-        LOGGER.warning("Excluding nonlocal targets..")
+        LOGGER.info("Excluding nonlocal targets..")
         tmp = {}
         for k, v in out.items():
-            if v['file']==makefile:
+            if v["file"] == makefile:
                 tmp[k] = v
         out = tmp
-    
+
     # user requested target aliases should be treated
     if parse_target_aliases:
         tmp = {}
@@ -397,11 +415,11 @@ def targets(
                 for alias in aliases:
                     tmp[alias] = {
                         **v,
-                        **dict(
-                            alias=True,
-                            primary=primary,
-                            docs=[f"(Alias for '{primary}')"],
-                        ),
+                        **{
+                            "alias": True,
+                            "primary": primary,
+                            "docs": [f"(Alias for '{primary}')"],
+                        },
                     }
             else:
                 tmp[aliases_maybe] = v
@@ -410,42 +428,59 @@ def targets(
     # user requested target-search
     if target:
         out = out[target]
+
+    # filter: user requested only public targets
     if public:
-        out={k:v for k,v in out.items() if not any([k.startswith(x) for x in 'self .'.split()])}
+        out = {
+            k: v
+            for k, v in out.items()
+            if not any(k.startswith(x) for x in "self .".split())
+        }
+    # filter: user requested only private targets
     if private:
-        out={k:v for k,v in out.items() if any([k.startswith(x) for x in 'self .'.split()])}
+        out = {
+            k: v
+            for k, v in out.items()
+            if any(k.startswith(x) for x in "self .".split())
+        }
+
+    # enrichment: user requested interpolated docs
     if interpolate:
-        for target,data in out.items():
-            if not data['docs']:
-                LOGGER.warning(f'interpolating: {target}')
-                prereqs=data['prereqs']
-                if not prereqs: 
-                    docs=[]
+        for target, data in out.items():
+            if not data["docs"]:
+                LOGGER.warning(f"interpolating: {target}")
+                prereqs = data["prereqs"]
+                if not prereqs:
+                    docs = []
                 else:
-                    docs = ['Stepwise summary:\n']
-                for i,p in enumerate(prereqs):
-                    alt=p[:p.find('/')+1]+'%'
-                    LOGGER.warning([p,alt])
-                    pdocs = ALL.get(p,{}).get('docs', [])
+                    docs = ["Stepwise summary:\n"]
+                for i, p in enumerate(prereqs):
+                    alt = p[: p.find("/") + 1] + "%"
+                    LOGGER.warning([p, alt])
+                    pdocs = ALL.get(p, {}).get("docs", [])
                     if pdocs:
-                        pdocs=f"`{p}`: {' '.join(pdocs[:1])}"
+                        pdocs = f"`{p}`: {' '.join(pdocs[:1])}"
                         # pdocs = pdocs[:80]
                         # pdocs=f'{pdocs[:pdocs.find(" ")]} .. '
                     else:
-                        subs = ALL.get(p,{}).get('prereqs', [])
+                        subs = ALL.get(p, {}).get("prereqs", [])
                         if subs:
-                            pdocs = ','.join([f'`{sub}`' for sub in subs])
+                            pdocs = ",".join([f"`{sub}`" for sub in subs])
                         else:
-                            LOGGER.warning(f'failed retrieving docs for {target}')
-                            pdocs = f'`{p}`: *(No summary available)* '
-                    these_docs = f'{i+1}. {pdocs}' #('\n'.join(pdocs))
+                            LOGGER.warning(f"failed retrieving docs for {target}")
+                            pdocs = f"`{p}`: *(No summary available)* "
+                    these_docs = f"{i+1}. {pdocs}"  # ('\n'.join(pdocs))
                     # doc=f"{i}. {p}\n{these_docs}"
-                    docs+=[these_docs]
+                    docs += [these_docs]
                 if not docs:
-                    docs=['Implementation summary:', '```bash'] + out[target]['body'][:3] + ['\n```\n']
-                out[target]['docs'] = docs
-                out[target]['interpolated']=True
-        
+                    docs = (
+                        ["Implementation summary:", "```bash"]
+                        + out[target]["body"][:3]
+                        + ["\n```\n"]
+                    )
+                out[target]["docs"] = docs
+                out[target]["interpolated"] = True
+
     # user requested lookup string or module docs
     if module_docs:
         modules = []
@@ -457,7 +492,7 @@ def targets(
                 continue
             if k[0] in "_ \t $ self".split():
                 continue
-            if any([x in k for x in "& /".split(" ")]):
+            if any(x in k for x in "& /".split(" ")):
                 continue
             if k not in modules:
                 modules.append(k)
@@ -468,7 +503,7 @@ def targets(
             if not line.startswith("#") and not line.startswith("@#"):
                 continue
             if "BEGIN" in line:
-                blockend = len(lines)
+                len(lines)
                 for j, l2 in enumerate(lines[i:]):
                     if not l2.strip():
                         block_end = i + j - 1
@@ -493,43 +528,48 @@ def targets(
 
         if module_docs:
             return blocks
-    
+
     if markdown:
-        template=jinja2.Template(help_t)
-        str_out=""
+        template = jinja2.Template(help_t)
+        str_out = ""
         for target in out:
-            str_out +="\n" + template.render(target=target, **out[target])
+            str_out += "\n" + template.render(target=target, **out[target])
         if preview:
             # from python_on_whales import docker
             # import docker
             # client = docker.from_env()
-            glow_img="charmcli/glow:v1.5.1"
-            glow_theme="dracula"
+            glow_img = "charmcli/glow:v1.5.1"
+            glow_theme = "dracula"
             with tempfile.TemporaryDirectory() as tmpdir:
-                path = os.path.join(tmpdir, 'cache.json')
-                fhandle = open(path,'w')
-            # with tempfile.NamedTemporaryFile(delete_on_close=False) as fhandle:
+                path = os.path.join(tmpdir, "cache.json")
+                fhandle = open(path, "w")
+                # with tempfile.NamedTemporaryFile(delete_on_close=False) as fhandle:
                 fhandle.write(str_out)
                 fhandle.close()
-                #print(str_out)
-                has_glow = 0==os.system('which glow')
+                # print(str_out)
+                has_glow = 0 == os.system("which glow")
                 if has_glow:
-                    LOGGER.warning("found that glow is installed, using it for previews")
-                    cmd = f'cat  {path} | glow -s dracula'
+                    LOGGER.warning(
+                        "found that glow is installed, using it for previews"
+                    )
+                    cmd = f"cat  {path} | glow -s dracula"
                 else:
                     LOGGER.warning("glow is missing, using docker version")
-                    cmd = f'cat  {path} | docker run -q -i -v {tmpdir}:{tmpdir}  {glow_img} -s {glow_theme}'
-                LOGGER.warning(f'calling \n{cmd}')
+                    cmd = f"cat  {path} | docker run -q -i -v {tmpdir}:{tmpdir}  {glow_img} -s {glow_theme}"
+                LOGGER.warning(f"calling \n{cmd}")
                 os.system(cmd)
-        else: 
+        else:
             print(str_out)
     else:
         json_output(out)
 
+
 @click.group()
 def main():
     """ """
-    
+
+
 # @main.command('db')
-[main.add_command(x) for x in [targets,includes]]
-if __name__=='__main__': main()
+[main.add_command(x) for x in [targets, includes]]
+if __name__ == "__main__":
+    main()
