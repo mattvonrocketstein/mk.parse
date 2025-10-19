@@ -118,7 +118,7 @@ def _database(makefile: str = "", make="make") -> typing.List[str]:
     (This output comes from 'make --print-data-base')
     FIXME: nix the temporary file..
     """
-    LOGGER.critical(f"building database for {makefile}")
+    LOGGER.debug(f"building database for {makefile}")
     validate_makefile(makefile)
     cmd = f"{make} --print-data-base -pqRrs -f {makefile} > .tmp.mk.db"
     os.system(cmd)
@@ -164,7 +164,10 @@ def cblocks(
                 label = line.split('BEGIN:')[-1].strip()
                 for j in range(i+1,len(lines)):
                     k = lines[j].strip()
-                    is_div = not k.replace('#','').replace('-','').replace('_','').replace("░",'').strip()
+                    is_div = all([
+                        len(k)>3,
+                        not k.replace('#','').replace('-','').replace('_','').replace("░",'').strip(),
+                        ])
                     if is_div or end_check(k): 
                         break
                     else:

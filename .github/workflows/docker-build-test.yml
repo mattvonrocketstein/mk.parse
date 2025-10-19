@@ -1,4 +1,4 @@
-name: Docker Build
+name: Docker Build/Test
 on:
   workflow_call: {}
   workflow_dispatch:
@@ -18,4 +18,4 @@ jobs:
         with:
           submodules: recursive
       - name: Build
-        run: make build test
+        run: make init static-analysis build test
