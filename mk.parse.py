@@ -1,7 +1,7 @@
 #!/usr/bin/env -S uv run --script
 # /// script
 # dependencies = [
-#   "click","jinja2","rich",
+#   "click==8.1.8","Jinja2==3.1.6","rich==14.1.0",
 # ]
 # ///
 import os
@@ -137,6 +137,8 @@ def includes(makefile: str = ""):
         includes = [line for line in lines if line.startswith("include ")]
         includes = [line.split()[1:] for line in includes]
     return json_output(includes)
+import collections
+
 
 @click.command()
 @click.argument("makefile")
@@ -145,15 +147,20 @@ def includes(makefile: str = ""):
     default='',
     help="Pattern to look for in keys",
 )
+@click.option(
+    "--lucky",
+    is_flag=True,
+    default=False,
+    help="Pattern to look for in keys",
+)
 def cblocks(
-    makefile: str = None, pattern:str="",
+    makefile: str = None, pattern:str="", lucky:bool=False,
     start_check=lambda s: any([s.startswith(x) for x in ['## BEGIN:', '# BEGIN:']]),
     end_check=lambda s: any([not s.strip(), not s.startswith('#')]),
 ):
     """
     Extract labeled comment-blocks
     """
-    import collections 
     blocks = collections.defaultdict(list)
     with open(makefile, 'r') as fhandle:
         lines = fhandle.readlines()
@@ -180,6 +187,10 @@ def cblocks(
             if re.match(f'.*{pattern}.*',k):
                 tmp[k] = blocks[k]
         out=tmp
+    if lucky:
+        out = list(out.items())
+        out= out[0] if out else None
+        out = dict(label=out[0],block=out[1]) if out else None
     return json_output(out)
 
 ##░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░
