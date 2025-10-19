@@ -66,10 +66,12 @@ def get_logger(name, console=stderr):
 
     # FIXME: get this from some kind of global config
     # logger.setLevel("DEBUG")
-    logger.setLevel("info".upper())
+    logger.setLevel(os.environ.get('MKPARSE_LOG_LEVEL',"warn".upper()))
 
     return logger
+##░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░
 
+import subprocess
 
 LOGGER = get_logger(__name__)
 
@@ -90,7 +92,7 @@ def validate_makefile(makefile: str):
     ):
         raise ValueError(f"{makefile} does not exist")
     else:
-        LOGGER.warning(f"parsing makefile @ {makefile}")
+        LOGGER.info(f"parsing makefile @ {makefile}")
 
 
 def _get_prov_line(body):
@@ -109,17 +111,6 @@ def _get_file(body=None, makefile=None):
         return str(makefile)
 
 
-@click.command()
-@click.argument("makefile")
-def includes(makefile: str = ""):
-    """ """
-    validate_makefile(makefile)
-    with open(makefile) as fhandle:
-        lines = fhandle.readlines()
-        includes = [line for line in lines if line.startswith("include ")]
-        includes = [line.split()[1:] for line in includes]
-    return json_output(includes)
-
 
 def _database(makefile: str = "", make="make") -> typing.List[str]:
     """
@@ -134,6 +125,63 @@ def _database(makefile: str = "", make="make") -> typing.List[str]:
     out = open(".tmp.mk.db").read().split("\n")
     os.remove(".tmp.mk.db")
     return out
+##░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░
+
+
+@click.command()
+@click.argument("makefile")
+def includes(makefile: str = ""):
+    """ Extract names of any included Makefiles
+    """
+    validate_makefile(makefile)
+    with open(makefile) as fhandle:
+        lines = fhandle.readlines()
+        includes = [line for line in lines if line.startswith("include ")]
+        includes = [line.split()[1:] for line in includes]
+    return json_output(includes)
+
+@click.command()
+@click.argument("makefile")
+@click.option(
+    "--pattern",
+    default='',
+    help="Pattern to look for in keys",
+)
+def cblocks(
+    makefile: str = None, pattern:str="",
+    start_check=lambda s: any([s.startswith(x) for x in ['## BEGIN:', '# BEGIN:']]),
+    end_check=lambda s: any([not s.strip(), not s.startswith('#')]),
+):
+    """
+    Extract labeled comment-blocks
+    """
+    import collections 
+    blocks = collections.defaultdict(list)
+    with open(makefile, 'r') as fhandle:
+        lines = fhandle.readlines()
+        for i,line in enumerate(lines):
+            if start_check(line):
+                label = line.split('BEGIN:')[-1].strip()
+                for j in range(i+1,len(lines)):
+                    k = lines[j].strip()
+                    is_div = not k.replace('#','').replace('-','').replace('_','').replace("░",'').strip()
+                    if is_div or end_check(k): 
+                        break
+                    else:
+                        k=k[1:]
+                        if k.startswith('# '):
+                            k = k[2:]
+                        blocks[label].append(k)
+    out = blocks
+    if pattern:
+        tmp={}
+        for k in blocks:
+            if re.match(f'.*{pattern}.*',k):
+                tmp[k] = blocks[k]
+        out=tmp
+    return json_output(out)
+
+##░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░
 
 
 @click.command()
@@ -168,9 +216,20 @@ def _database(makefile: str = "", make="make") -> typing.List[str]:
     default=False,
     help="Filter for local targets only (no includes)",
 )
+@click.option(
+    "--prefix",
+    default='',
+    help="Prefix to filter for",
+)
 @click.option("--local", is_flag=True, default=False, help="Alias for --locals")
 @click.option(
     "--interpolate", is_flag=True, default=False, help="Interpolate docstrings"
+)
+@click.option(
+    "--shallow",
+    is_flag=True,
+    default=False,
+    help="Simple target extraction without make's db. (Does not process includes/macros)",
 )
 @click.option(
     "--parametrics",
@@ -181,23 +240,21 @@ def _database(makefile: str = "", make="make") -> typing.List[str]:
 @click.option(
     "--preview", is_flag=True, default=False, help="Pretty-printer (implies --markdown)"
 )
-@click.option(
-    "--module-docs", is_flag=True, default=False, help="Only return module docs"
-)
 @click.argument("makefile")
 def targets(
     makefile: str = None,
     target: str = "",
+    prefix: str = "",
     body: bool = False,
     interpolate: bool = False,
     locals: bool = False,
     local: bool = False,
     public: bool = False,
+    shallow: bool = False,
     private: bool = False,
     parametrics: bool = False,
     preview: bool = False,
     markdown: bool = False,
-    module_docs: bool = False,
     parse_target_aliases: bool = True,
     **kwargs,
 ):
@@ -256,6 +313,14 @@ def targets(
         return rfmt
 
     assert makefile and os.path.exists(makefile), f"file @ {makefile} does not exist"
+    if shallow:
+        LOGGER.warning(f"Parsing {makefile} in shallow-mode!")
+        LOGGER.warning("This excludes dynamic targets, included targets and target metadata")
+        cmd=f"cat {makefile}" + """ | awk '/^define/ { in_define = 1 } /^endef/  { in_define = 0; next } !in_define { print }' """
+        tmp = subprocess.run(cmd, shell=True, capture_output=True)
+        lines = tmp.stdout.decode().split('\n')
+        lines = [line.split(':')[0] for line in lines if re.match(r'^[a-zA-Z-_/]+[:]', line)]
+        return json_output(lines)
     db = _database(makefile, **kwargs)
     raw_content = open(makefile).read()
     original = raw_content.split("\n")
@@ -282,8 +347,9 @@ def targets(
     targets = [t for t in targets if t != f"{makefile}:"]
     for tline in targets:
         if any(
-            tline.startswith(" ") or tline.startswith(x) for x in "$ @ & \t".split(" ")
-        ):
+           [ tline.startswith(" ")]+[tline.startswith(x) for x in "$ @ & \t".split(" ")] +[';' in tline]
+
+           ):
             continue
         bits = tline.split(":")
         target_name = bits.pop(0)
@@ -332,6 +398,8 @@ def targets(
             "docs": [x[len("\t@#") :] for x in target_body if x.startswith("\t@#")],
             "prereqs": list(set(prereqs)),
         }
+        if 'skip' in target_name:
+            raise Exception([tline, target,out[target_name]])
         if type == "implicit":
             regex = target_name.replace("%", ".*")
             out[target_name].update(regex=regex)
@@ -427,7 +495,12 @@ def targets(
 
     # user requested target-search
     if target:
-        out = out[target]
+        out = {target: out[target]}
+    if prefix:
+        out = {
+            k: v
+            for k, v in out.items()
+            if k.startswith(prefix)}
 
     # filter: user requested only public targets
     if public:
@@ -481,54 +554,7 @@ def targets(
                 out[target]["docs"] = docs
                 out[target]["interpolated"] = True
 
-    # user requested lookup string or module docs
-    if module_docs:
-        modules = []
-        blocks = {}
-        for k in out.keys():
-            k = k.strip().lstrip()
-            k = k.split(".")[0]
-            if not k:
-                continue
-            if k[0] in "_ \t $ self".split():
-                continue
-            if any(x in k for x in "& /".split(" ")):
-                continue
-            if k not in modules:
-                modules.append(k)
-        LOGGER.debug(f"found modules: {modules}")
-        lines = open(makefile).readlines()
-        for i, line in enumerate(lines):
-            line = line.lstrip()
-            if not line.startswith("#") and not line.startswith("@#"):
-                continue
-            if "BEGIN" in line:
-                len(lines)
-                for j, l2 in enumerate(lines[i:]):
-                    if not l2.strip():
-                        block_end = i + j - 1
-                        break
-                found = None
-                for mod in modules:
-                    if mod in line:
-                        found = mod
-                        break
-                if not found:
-                    LOGGER.warning(f"could not find module for block: {line}")
-                    blocks[line[line.index("BEGIN") :].strip()] = lines[
-                        i + 1 : block_end
-                    ]
-                else:
-                    blocks[found] = lines[i:block_end]
-        blocks = {
-            k: [line[len("## ") :].strip() for line in v] for k, v in blocks.items()
-        }
-        for k, v in blocks.items():
-            blocks[k] = zip_markdown(v[1:])
-
-        if module_docs:
-            return blocks
-
+    # user requested markdown output, not json
     if markdown:
         template = jinja2.Template(help_t)
         str_out = ""
@@ -556,7 +582,7 @@ def targets(
                 else:
                     LOGGER.warning("glow is missing, using docker version")
                     cmd = f"cat  {path} | docker run -q -i -v {tmpdir}:{tmpdir}  {glow_img} -s {glow_theme}"
-                LOGGER.warning(f"calling \n{cmd}")
+                LOGGER.info(f"cmd: \n{cmd}")
                 os.system(cmd)
         else:
             print(str_out)
@@ -570,6 +596,6 @@ def main():
 
 
 # @main.command('db')
-[main.add_command(x) for x in [targets, includes]]
+[main.add_command(x) for x in [cblocks, targets, includes]]
 if __name__ == "__main__":
     main()
