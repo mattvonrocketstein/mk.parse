@@ -110,8 +110,6 @@ def _get_file(body=None, makefile=None):
     else:
         return str(makefile)
 
-
-
 def _database(makefile: str = "", make="make") -> typing.List[str]:
     """
     Get database for Makefile
@@ -125,8 +123,8 @@ def _database(makefile: str = "", make="make") -> typing.List[str]:
     out = open(".tmp.mk.db").read().split("\n")
     os.remove(".tmp.mk.db")
     return out
-##░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░
 
+##░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░
 
 @click.command()
 @click.argument("makefile")
@@ -322,7 +320,7 @@ def targets(
         cmd=f"cat {makefile}" + """ | awk '/^define/ { in_define = 1 } /^endef/  { in_define = 0; next } !in_define { print }' """
         tmp = subprocess.run(cmd, shell=True, capture_output=True)
         lines = tmp.stdout.decode().split('\n')
-        lines = [line.split(':')[0] for line in lines if re.match(r'^[a-zA-Z-_/]+[:]', line)]
+        lines = [line.split(':')[0] for line in lines if re.match(r'^[a-zA-Z-_/]+[:][^=]', line)]
         return json_output(lines)
     db = _database(makefile, **kwargs)
     raw_content = open(makefile).read()
