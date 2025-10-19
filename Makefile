@@ -37,10 +37,12 @@ init: flux.stage/init mk.stat docker.stat pip.install/tox pip.install/uv
 	@# Project init. 
 
 build: flux.stage/build flux.timer/mkp.build
-	@# Project build. 
+	@# Builds the docker container for this project
 
-serve: workspace.serve
-
+install:
+	@# Global install (requires sudo)
+	set -x && chmod +x ./mk.parse.py \
+	&& cp ./mk.parse.py /usr/local/bin/mk.parse
 
 test: flux.stage/test
 	./mk.parse.py cblocks Makefile

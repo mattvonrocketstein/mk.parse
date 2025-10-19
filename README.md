@@ -43,7 +43,16 @@ Options:
 
 # Use the Script 
 
-If you have `uv` installed, you can run [the script](mk.parse.py) directly.
+If you have `uv` installed, you can run [the script](mk.parse.py) directly.  If the project's cloned already, use `sudo make install`.  Otherwise you can install manually using something like this:
+
+```bash
+$ wget https://raw.githubusercontent.com/mattvonrocketstein/mk.parse/refs/heads/v1.2.4/mk.parse.py
+$ mv mk.parse.py /usr/local/bin/mk.parse
+$ chmod +x /usr/local/bin/mk.parse
+
+# dependencies cached on first run
+mk.parse --help
+```
 
 # Docker
 
