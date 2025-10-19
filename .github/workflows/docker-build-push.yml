@@ -15,8 +15,8 @@ on:
     paths-ignore:
       - '**.md'    
       - '**.png'    
-  # pull_request:
-  #   branches: [ main ]
+  pull_request:
+    branches: [ main ]
 env:
   REGISTRY: ghcr.io
   IMAGE_NAME: mattvonrocketstein/mk.parse
