@@ -170,8 +170,8 @@ def cblocks(
                         break
                     else:
                         k=k[1:]
-                        if k.startswith('# '):
-                            k = k[2:]
+                        if k.startswith('#'):
+                            k = k[1:].strip()
                         blocks[label].append(k)
     out = blocks
     if pattern:
