@@ -365,10 +365,10 @@ def targets(
             makefile=makefile,
         )
         # file can maybe still be wrong in the makefile database?, depends how include happened..
-        # if file == makefile and not re.findall(
-        #     rf"^{target_name}:.*", raw_content, re.MULTILINE
-        # ):
-        #     file = None
+        if file == makefile and not re.findall(
+            rf"^{target_name}:.*", raw_content, re.MULTILINE
+        ):
+            file = None
         if pline:
             # take advice from make's database.
             # we return this because it's authoritative,
@@ -386,12 +386,11 @@ def targets(
         lineno = lineno and (int(lineno) - 1)
         prereqs = [x for x in childs.split() if x.strip()]
         header = target_body.pop(0)
-        target_body = [b.lstrip() for b in target_body if not b.startswith("#  ")]
         out[target_name] = {
             "file": file,
             "lineno": lineno,
             "header": header,
-            "body": target_body,
+            "body": [b.lstrip() for b in target_body if not b.startswith("#  ")],
             "parametric": "%" in target_name,
             "chain": None,
             "type": type,
