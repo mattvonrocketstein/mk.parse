@@ -13,7 +13,7 @@ THIS_MAKEFILE := $(abspath $(firstword $(MAKEFILE_LIST)))
 SRC_ROOT := $(shell dirname ${THIS_MAKEFILE})
 docs.root=docs/
 
-py.src_root:=*.py
+py.src_root:=./mk.parse.py
 img.ref=compose.mk:mkp
 img.official=ghcr.io/mattvonrocketstein/mk.parse:v1.2.4
 # img.ref=`case $${GITHUB_ACTIONS:-false} in false) echo ${img.local};; *) echo ${img.official};; esac`

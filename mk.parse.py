@@ -10,6 +10,8 @@ import json
 import typing
 import logging
 import tempfile
+import subprocess
+import collections
 from pathlib import Path
 
 import click
@@ -71,7 +73,6 @@ def get_logger(name, console=stderr):
     return logger
 ##░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░
 
-import subprocess
 
 LOGGER = get_logger(__name__)
 
@@ -114,8 +115,8 @@ def _database(makefile: str = "", make="make") -> typing.List[str]:
     """
     Get database for Makefile
     (This output comes from 'make --print-data-base')
-    FIXME: nix the temporary file..
     """
+    # FIXME: nix the temporary file..
     LOGGER.debug(f"building database for {makefile}")
     validate_makefile(makefile)
     cmd = f"{make} --print-data-base -pqRrs -f {makefile} > .tmp.mk.db"
@@ -125,20 +126,6 @@ def _database(makefile: str = "", make="make") -> typing.List[str]:
     return out
 
 ##░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░
-
-@click.command()
-@click.argument("makefile")
-def includes(makefile: str = ""):
-    """ Extract names of any included Makefiles
-    """
-    validate_makefile(makefile)
-    with open(makefile) as fhandle:
-        lines = fhandle.readlines()
-        includes = [line for line in lines if line.startswith("include ")]
-        includes = [line.split()[1:] for line in includes]
-    return json_output(includes)
-import collections
-
 
 @click.command()
 @click.argument("makefile")
@@ -276,6 +263,7 @@ def targets(
     markdown = markdown or preview
     locals = locals or local
     body = body or interpolate
+    pruned = {}
 
     def _enricher(text, pattern):
         """ """
@@ -376,11 +364,11 @@ def targets(
             body=target_body,
             makefile=makefile,
         )
-        # file can still be wrong in the makefile database, depends how include happened..
-        if file == makefile and not re.findall(
-            f"^{target_name}:.*", raw_content, re.MULTILINE
-        ):
-            file = None
+        # file can maybe still be wrong in the makefile database?, depends how include happened..
+        # if file == makefile and not re.findall(
+        #     rf"^{target_name}:.*", raw_content, re.MULTILINE
+        # ):
+        #     file = None
         if pline:
             # take advice from make's database.
             # we return this because it's authoritative,
@@ -461,6 +449,27 @@ def targets(
                             break
             zmd = zip_markdown(docs)
             out[target_name]["docs"] = [] if zmd == [""] else zmd
+
+    # user requested target aliases should be treated
+    if parse_target_aliases:
+        tmp = {}
+        for aliases_maybe, v in out.items():
+            aliases = aliases_maybe.split(" ")
+            if len(aliases) > 1:
+                primary = aliases.pop(0)
+                tmp[primary] = v
+                for alias in aliases:
+                    tmp[alias] = {
+                        **v,
+                        **{
+                            "alias": True,
+                            "primary": primary,
+                            "docs": [f"(Alias for '{primary}')"],
+                        },
+                    }
+            else:
+                tmp[aliases_maybe] = v
+        out = tmp
     ALL = out.copy()
 
     # filter: user requested only parametrics
@@ -482,27 +491,6 @@ def targets(
         for k, v in out.items():
             if v["file"] == makefile:
                 tmp[k] = v
-        out = tmp
-
-    # user requested target aliases should be treated
-    if parse_target_aliases:
-        tmp = {}
-        for aliases_maybe, v in out.items():
-            aliases = aliases_maybe.split(" ")
-            if len(aliases) > 1:
-                primary = aliases.pop(0)
-                tmp[primary] = v
-                for alias in aliases:
-                    tmp[alias] = {
-                        **v,
-                        **{
-                            "alias": True,
-                            "primary": primary,
-                            "docs": [f"(Alias for '{primary}')"],
-                        },
-                    }
-            else:
-                tmp[aliases_maybe] = v
         out = tmp
 
     # user requested target-search
@@ -565,6 +553,14 @@ def targets(
                     )
                 out[target]["docs"] = docs
                 out[target]["interpolated"] = True
+    for k in ALL:
+        if not any([
+            out[k]['file'],
+            #out[k]['lineno'], 
+                out[k]['chain'], out[k]['docs'],]):
+            pruned[k] = out.pop(k)
+    if pruned:
+        LOGGER.warning(f"pruned these targets with no details: {list(pruned.keys())}")
 
     # user requested markdown output, not json
     if markdown:
@@ -602,12 +598,37 @@ def targets(
         json_output(out)
 
 
+##░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░
+
+@click.command('database')
+@click.argument("makefile")
+def database(*args, **kwargs): 
+    """ Return the database according to `make --print-data-base` """
+    print('\n'.join(_database(*args, **kwargs)))
+@click.command()
+@click.argument("makefile")
+def db(*args, **kwargs): 
+    """ Alias for 'database' subcommand """
+    return print('\n'.join(_database(*args, **kwargs)))
+
+@click.command()
+@click.argument("makefile")
+def includes(makefile: str = ""):
+    """ Extract names of any included Makefiles
+    """
+    validate_makefile(makefile)
+    with open(makefile) as fhandle:
+        lines = fhandle.readlines()
+        includes = [line for line in lines if line.startswith("include ")]
+        includes = [line.split()[1:] for line in includes]
+    return json_output(includes)
+
+##░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░
+
 @click.group()
 def main():
     """ """
 
-
-# @main.command('db')
-[main.add_command(x) for x in [cblocks, targets, includes]]
+[main.add_command(x) for x in [cblocks, database,db,targets, includes]]
 if __name__ == "__main__":
     main()
