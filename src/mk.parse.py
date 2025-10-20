@@ -19,8 +19,7 @@ import jinja2
 from rich.console import Console
 from rich.logging import RichHandler
 
-# parser = parse
-help_t = """
+DOCS_TEMPLATE = """
 [`{{target}}`](#) *(via {{file}}:{{lineno}})*
 
 {%if prereqs and not interpolated%}
@@ -63,13 +62,8 @@ def get_logger(name, console=stderr):
         datefmt="",
     )
     log_handler.setFormatter(formatter)
-
     logger = logging.getLogger(name)
-
-    # FIXME: get this from some kind of global config
-    # logger.setLevel("DEBUG")
     logger.setLevel(os.environ.get("MKPARSE_LOG_LEVEL", "warn".upper()))
-
     return logger
 
 
@@ -84,7 +78,15 @@ def json_output(out):
     return out
 
 
-def validate_makefile(makefile: str):
+def validate_makefile(makefile: str, strict: bool = False):
+    """
+    Validation here isn't *real* validation since it slows things
+    down.
+
+    FIXME: finish the strict-mode
+    """
+    if strict:
+        LOGGER.critical("strict mode for validation isnt implemented yet!")
     assert makefile
     tmp = Path(makefile)
     if not all(
@@ -98,7 +100,7 @@ def validate_makefile(makefile: str):
         LOGGER.info(f"parsing makefile @ {makefile}")
 
 
-def _get_prov_line(body):
+def _get_provenance_line(body):
     """
     
     """
@@ -109,7 +111,7 @@ def _get_prov_line(body):
 
 def _get_file(body=None, makefile=None):
     """WARNING: answers according to make's db, but often still wrong!"""
-    pline = _get_prov_line(body)
+    pline = _get_provenance_line(body)
     if pline:
         return pline.split(_recipe_pattern)[-1].split("'")[0]
     else:
@@ -119,14 +121,15 @@ def _get_file(body=None, makefile=None):
 def _database(makefile: str = "", make="make") -> typing.List[str]:
     """
     Get database for Makefile (This output comes from 'make
-    --print-data-base')
+    --print-data-base') # FIXME: nix the temporary file and use
+    streams.
     """
-    # FIXME: nix the temporary file..
     LOGGER.debug(f"building database for {makefile}")
     validate_makefile(makefile)
-    cmd = f"{make} --print-data-base -pqRrs -f {makefile} > .tmp.mk.db"
+    cmd = f"{make} --print-data-base -pqRrs -f {makefile} > .tmp.mk.db 2>/dev/null"
     os.system(cmd)
-    out = open(".tmp.mk.db").read().split("\n")
+    with open(".tmp.mk.db") as fhandle:
+        out = fhandle.read().split("\n")
     os.remove(".tmp.mk.db")
     return out
 
@@ -196,6 +199,7 @@ def cblocks(
     return json_output(out)
 
 
+## Primary click command for `targets`
 ##░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░
 
 
@@ -253,6 +257,16 @@ def cblocks(
     help="Filter for parametric-targets only (using '%')",
 )
 @click.option(
+    "-a",
+    "--abs-paths",
+    is_flag=True,
+    default=False,
+    help="Use abs-paths in metadata (default is relative)",
+)
+@click.option(
+    "--names-only", is_flag=True, default=False, help="Returns names only (no metadata)"
+)
+@click.option(
     "--preview", is_flag=True, default=False, help="Pretty-printer (implies --markdown)"
 )
 @click.argument("makefile")
@@ -263,8 +277,10 @@ def targets(
     body: bool = False,
     interpolate: bool = False,
     locals: bool = False,
+    abs_paths: bool = True,
     local: bool = False,
     public: bool = False,
+    names_only: bool = False,
     shallow: bool = False,
     private: bool = False,
     parametrics: bool = False,
@@ -282,26 +298,9 @@ def targets(
     locals = locals or local
     body = body or interpolate
     pruned = {}
-
-    def _enricher(text, pattern):
-        """
-        
-        """
-        # raise Exception(text)
-        pat = re.compile(pattern, re.MULTILINE)
-
-        def rrr(match):
-            label = match.group("label")
-            indent = match.group("indent")
-            content = match.group("content")
-            dedented_content = re.sub(r"^[\t\s]{2,4}", "", content, flags=re.MULTILINE)
-            code_block = (
-                f"{indent}\n\nEXAMPLE:{label}\n\n```bash\n{dedented_content}```\n"
-            )
-            return code_block
-
-        result = pat.sub(rrr, text)
-        return result
+    if names_only:
+        err = "--names-only is exclusive with {markdown|preview} "
+        assert not any([markdown, preview]), err + f"{markdown,preview}"
 
     def _test(x):
         """
@@ -315,24 +314,20 @@ def targets(
         return all(tests)
 
     def zip_markdown(docs):
-        if isinstance(docs, (str,)):
-            docs = docs.split("\n")
-        rfmt = [""]
-        while docs:
-            tmp = docs.pop(0)
-            if any(tmp.lstrip().startswith(x) for x in "* |".split()) or any(
-                x in tmp for x in "USAGE: EXAMPLE: ```".split()
-            ):
-                rfmt = rfmt + [tmp] + docs
-                break
-            if tmp.lstrip().startswith("---"):
-                rfmt += [tmp]
-                continue
-            elif tmp:
-                rfmt[-1] += f" {tmp}"
-            else:
-                rfmt += ["", tmp]
-        return rfmt
+        if isinstance(docs, (list,)):
+            docs = "\n".join(docs)
+            pattern = r"(^.*?(?:USAGE|EXAMPLE):.*$)\n((?:[ \t]+.+\n?)+)"
+
+            def replacer(match):
+                header = match.group(1)
+                indented_block = match.group(2)
+                # Remove trailing newline from block if present to avoid extra spacing
+                indented_block = indented_block.rstrip("\n")
+                return f"{header}\n```\n{indented_block}\n```\n"
+
+            result = re.sub(pattern, replacer, docs, flags=re.MULTILINE)
+            result = re.sub(r"\n{2,}", "\n\n", result)
+            return result.split("\n")
 
     assert makefile and os.path.exists(makefile), f"file @ {makefile} does not exist"
     if shallow:
@@ -353,7 +348,8 @@ def targets(
         ]
         return json_output(lines)
     db = _database(makefile, **kwargs)
-    raw_content = open(makefile).read()
+    with open(makefile) as fhandle:
+        raw_content = fhandle.read()
     original = raw_content.split("\n")
     variables_start = db.index(_variables_pattern)
     variables_end = db.index("", variables_start + 2)
@@ -391,7 +387,7 @@ def targets(
         line_start = db.index(tline)
         line_end = db.index("", line_start)
         target_body = db[line_start:line_end]
-        pline = _get_prov_line(target_body)
+        pline = _get_provenance_line(target_body)
         file = _get_file(
             body=target_body,
             makefile=makefile,
@@ -401,6 +397,13 @@ def targets(
             rf"^{target_name}:.*", raw_content, re.MULTILINE
         ):
             file = None
+
+        # user requested absolute-paths
+        if file and not abs_paths:
+            try:
+                file = str(Path(file).resolve().relative_to(Path.cwd()))
+            except ValueError:
+                file = str(file)
         if pline:
             # take advice from make's database.
             # we return this because it's authoritative,
@@ -465,21 +468,9 @@ def targets(
             out[target_name]["docs"] = out[tmeta["chain"]]["docs"]
         # user requested enriching docs with markdown
         if markdown:
-            docs = [x.lstrip() for x in out[target_name]["docs"]]
-            for i, line in enumerate(docs):
-                if line.startswith("EXAMPLE:") or line.startswith("USAGE:"):
-                    docs[i] = (
-                        line.replace("EXAMPLE:", "*EXAMPLE:*")
-                        .replace("USAGE:", "*USAGE:*")
-                        .replace("REFS:", "*REFS:*")
-                        + "\n```bash"
-                    )
-                    for j, line2 in enumerate(docs[i:]):
-                        if not line2:
-                            docs[i + j] = line2 + "```\n"
-                            break
+            docs = out[target_name]["docs"]
             zmd = zip_markdown(docs)
-            out[target_name]["docs"] = [] if zmd == [""] else zmd
+            out[target_name]["docs"] = [] if not any(zmd) else zmd
 
     # user requested target aliases should be treated
     if parse_target_aliases:
@@ -583,6 +574,7 @@ def targets(
                     )
                 out[target]["docs"] = docs
                 out[target]["interpolated"] = True
+
     for k in ALL:
         tmp = out.get(k, {})
         if tmp and not any(
@@ -592,33 +584,29 @@ def targets(
     if pruned:
         LOGGER.warning(f"pruned these targets with no details: {list(pruned.keys())}")
 
+    # user requested only target-names
+    if names_only:
+        return print("\n".join(out.keys()))
+
     # user requested markdown output, not json
     if markdown:
-        template = jinja2.Template(help_t)
+        template = jinja2.Template(DOCS_TEMPLATE)
         str_out = ""
         for target in out:
             str_out += "\n" + template.render(target=target, **out[target])
         if preview:
-            # from python_on_whales import docker
-            # import docker
-            # client = docker.from_env()
             glow_img = "charmcli/glow:v1.5.1"
             glow_theme = "dracula"
             with tempfile.TemporaryDirectory() as tmpdir:
                 path = os.path.join(tmpdir, "cache.json")
-                fhandle = open(path, "w")
-                # with tempfile.NamedTemporaryFile(delete_on_close=False) as fhandle:
-                fhandle.write(str_out)
-                fhandle.close()
-                # print(str_out)
+                with open(path, "w") as fhandle:
+                    fhandle.write(str_out)
                 has_glow = os.system("which glow") == 0
                 if has_glow:
-                    LOGGER.warning(
-                        "found that glow is installed, using it for previews"
-                    )
+                    LOGGER.info("found that glow is installed, using it for previews")
                     cmd = f"cat  {path} | glow -s dracula"
                 else:
-                    LOGGER.warning("glow is missing, using docker version")
+                    LOGGER.info("glow is missing, using docker version")
                     cmd = f"cat  {path} | docker run -q -i -v {tmpdir}:{tmpdir}  {glow_img} -s {glow_theme}"
                 LOGGER.info(f"cmd: \n{cmd}")
                 os.system(cmd)
@@ -628,6 +616,7 @@ def targets(
         json_output(out)
 
 
+# Ancillary click commands
 ##░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░
 
 
@@ -635,7 +624,8 @@ def targets(
 @click.argument("makefile")
 def database(*args, **kwargs):
     """
-    Return the database according to `make --print-data-base`
+    Get database for Makefile (This output comes from 'make
+    --print-data-base')
     """
     print("\n".join(_database(*args, **kwargs)))
 
@@ -669,10 +659,11 @@ def includes(makefile: str = ""):
 @click.group()
 def main():
     """
-    
+    mk.parse: Makefile parsing and metadata extraction.
     """
 
 
 [main.add_command(x) for x in [cblocks, database, db, targets, includes]]
+
 if __name__ == "__main__":
     main()

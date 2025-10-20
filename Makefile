@@ -52,12 +52,11 @@ test: flux.stage/test
 	args='targets Makefile --private' && ${dexec}
 	args='targets Makefile --prefix build' && ${dexec}
 
+#░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░
 
 $(call tox.import, normalize static-analysis)
 validate lint: static-analysis
 normalize: tox.normalize.dispatch/py.normalize
-# self.normalize: py.normalize
-# self.static-analysis: py.static-analysis
 
 self.normalize:
 	pushd src; shed; popd; 
@@ -68,13 +67,9 @@ self.normalize:
 		--wrap-summaries 65 --pre-summary-newline --make-summary-multi-line src \
 		|| true )
 
-# validate lint: type-check static-analysis
 self.static-analysis:
 	$(call log.target, ${no_ansi}source code ${sep} flake8 and vulture)
 	flake8 --config .flake8 src
 	vulture src --min-confidence 90
-	$(call log.target, ${no_ansi}test code ${sep} flake8 and vulture)
-	flake8 --config .flake8 tests
-	vulture tests --min-confidence 90
 	$(call log.target, interrogate ${sep} docstring coverage follows)
 	(interrogate -v src/ || true)

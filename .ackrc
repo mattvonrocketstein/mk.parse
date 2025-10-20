@@ -48,6 +48,7 @@
 # Subversion
 # https://subversion.apache.org/
 --ignore-directory=is:.svn
+--ignore-directory=is:.cmk
 
 # Monotone
 # https://www.monotone.ca/
