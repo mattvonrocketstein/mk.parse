@@ -4,14 +4,14 @@
 #   "click==8.1.8","Jinja2==3.1.6","rich==14.1.0",
 # ]
 # ///
+import collections
+import json
+import logging
 import os
 import re
-import json
-import typing
-import logging
-import tempfile
 import subprocess
-import collections
+import tempfile
+import typing
 from pathlib import Path
 
 import click
@@ -68,9 +68,11 @@ def get_logger(name, console=stderr):
 
     # FIXME: get this from some kind of global config
     # logger.setLevel("DEBUG")
-    logger.setLevel(os.environ.get('MKPARSE_LOG_LEVEL',"warn".upper()))
+    logger.setLevel(os.environ.get("MKPARSE_LOG_LEVEL", "warn".upper()))
 
     return logger
+
+
 ##░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░
 
 
@@ -97,7 +99,9 @@ def validate_makefile(makefile: str):
 
 
 def _get_prov_line(body):
-    """ """
+    """
+    
+    """
     pline = [x for x in body if _recipe_pattern in x]
     pline = pline[0] if pline else None
     return pline
@@ -111,10 +115,11 @@ def _get_file(body=None, makefile=None):
     else:
         return str(makefile)
 
+
 def _database(makefile: str = "", make="make") -> typing.List[str]:
     """
-    Get database for Makefile
-    (This output comes from 'make --print-data-base')
+    Get database for Makefile (This output comes from 'make
+    --print-data-base')
     """
     # FIXME: nix the temporary file..
     LOGGER.debug(f"building database for {makefile}")
@@ -125,13 +130,15 @@ def _database(makefile: str = "", make="make") -> typing.List[str]:
     os.remove(".tmp.mk.db")
     return out
 
+
 ##░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░
+
 
 @click.command()
 @click.argument("makefile")
 @click.option(
     "--pattern",
-    default='',
+    default="",
     help="Pattern to look for in keys",
 )
 @click.option(
@@ -141,44 +148,53 @@ def _database(makefile: str = "", make="make") -> typing.List[str]:
     help="Pattern to look for in keys",
 )
 def cblocks(
-    makefile: str = None, pattern:str="", lucky:bool=False,
-    start_check=lambda s: any([s.startswith(x) for x in ['## BEGIN:', '# BEGIN:']]),
-    end_check=lambda s: any([not s.strip(), not s.startswith('#')]),
+    makefile: str = None,
+    pattern: str = "",
+    lucky: bool = False,
+    start_check=lambda s: any([s.startswith(x) for x in ["## BEGIN:", "# BEGIN:"]]),
+    end_check=lambda s: any([not s.strip(), not s.startswith("#")]),
 ):
     """
-    Extract labeled comment-blocks
+    Extract labeled comment-blocks.
     """
     blocks = collections.defaultdict(list)
-    with open(makefile, 'r') as fhandle:
+    with open(makefile) as fhandle:
         lines = fhandle.readlines()
-        for i,line in enumerate(lines):
+        for i, line in enumerate(lines):
             if start_check(line):
-                label = line.split('BEGIN:')[-1].strip()
-                for j in range(i+1,len(lines)):
+                label = line.split("BEGIN:")[-1].strip()
+                for j in range(i + 1, len(lines)):
                     k = lines[j].strip()
-                    is_div = all([
-                        len(k)>3,
-                        not k.replace('#','').replace('-','').replace('_','').replace("░",'').strip(),
-                        ])
-                    if is_div or end_check(k): 
+                    is_div = all(
+                        [
+                            len(k) > 3,
+                            not k.replace("#", "")
+                            .replace("-", "")
+                            .replace("_", "")
+                            .replace("░", "")
+                            .strip(),
+                        ]
+                    )
+                    if is_div or end_check(k):
                         break
                     else:
-                        k=k[1:]
-                        if k.startswith('#'):
+                        k = k[1:]
+                        if k.startswith("#"):
                             k = k[1:].strip()
                         blocks[label].append(k)
     out = blocks
     if pattern:
-        tmp={}
+        tmp = {}
         for k in blocks:
-            if re.match(f'.*{pattern}.*',k):
+            if re.match(f".*{pattern}.*", k):
                 tmp[k] = blocks[k]
-        out=tmp
+        out = tmp
     if lucky:
         out = list(out.items())
-        out= out[0] if out else None
-        out = dict(label=out[0],block=out[1]) if out else None
+        out = out[0] if out else None
+        out = dict(label=out[0], block=out[1]) if out else None
     return json_output(out)
+
 
 ##░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░
 
@@ -217,7 +233,7 @@ def cblocks(
 )
 @click.option(
     "--prefix",
-    default='',
+    default="",
     help="Prefix to filter for",
 )
 @click.option("--local", is_flag=True, default=False, help="Alias for --locals")
@@ -258,7 +274,9 @@ def targets(
     **kwargs,
 ):
     """
-    Parse Makefile to JSON.  Includes targets/prereqs details and documentation.
+    Parse Makefile to JSON.
+
+    Includes targets/prereqs details and documentation.
     """
     markdown = markdown or preview
     locals = locals or local
@@ -266,7 +284,9 @@ def targets(
     pruned = {}
 
     def _enricher(text, pattern):
-        """ """
+        """
+        
+        """
         # raise Exception(text)
         pat = re.compile(pattern, re.MULTILINE)
 
@@ -284,7 +304,9 @@ def targets(
         return result
 
     def _test(x):
-        """ """
+        """
+        
+        """
         tests = [
             ":" in x.strip(),
             not x.startswith("#"),
@@ -315,11 +337,20 @@ def targets(
     assert makefile and os.path.exists(makefile), f"file @ {makefile} does not exist"
     if shallow:
         LOGGER.warning(f"Parsing {makefile} in shallow-mode!")
-        LOGGER.warning("This excludes dynamic targets, included targets and target metadata")
-        cmd=f"cat {makefile}" + """ | awk '/^define/ { in_define = 1 } /^endef/  { in_define = 0; next } !in_define { print }' """
+        LOGGER.warning(
+            "This excludes dynamic targets, included targets and target metadata"
+        )
+        cmd = (
+            f"cat {makefile}"
+            + """ | awk '/^define/ { in_define = 1 } /^endef/  { in_define = 0; next } !in_define { print }' """
+        )
         tmp = subprocess.run(cmd, shell=True, capture_output=True)
-        lines = tmp.stdout.decode().split('\n')
-        lines = [line.split(':')[0] for line in lines if re.match(r'^[a-zA-Z-_/]+[:][^=]', line)]
+        lines = tmp.stdout.decode().split("\n")
+        lines = [
+            line.split(":")[0]
+            for line in lines
+            if re.match(r"^[a-zA-Z-_/]+[:][^=]", line)
+        ]
         return json_output(lines)
     db = _database(makefile, **kwargs)
     raw_content = open(makefile).read()
@@ -347,9 +378,10 @@ def targets(
     targets = [t for t in targets if t != f"{makefile}:"]
     for tline in targets:
         if any(
-           [ tline.startswith(" ")]+[tline.startswith(x) for x in "$ @ & \t".split(" ")] +[';' in tline]
-
-           ):
+            [tline.startswith(" ")]
+            + [tline.startswith(x) for x in "$ @ & \t".split(" ")]
+            + [";" in tline]
+        ):
             continue
         bits = tline.split(":")
         target_name = bits.pop(0)
@@ -397,8 +429,8 @@ def targets(
             "docs": [x[len("\t@#") :] for x in target_body if x.startswith("\t@#")],
             "prereqs": list(set(prereqs)),
         }
-        if 'skip' in target_name:
-            raise Exception([tline, target,out[target_name]])
+        if "skip" in target_name:
+            raise Exception([tline, target, out[target_name]])
         if type == "implicit":
             regex = target_name.replace("%", ".*")
             out[target_name].update(regex=regex)
@@ -493,13 +525,12 @@ def targets(
         out = tmp
 
     # user requested target-search
+    # NB: this changes the response schema!
     if target:
-        out = {target: out[target]}
+        out = out.get(target, {})
+
     if prefix:
-        out = {
-            k: v
-            for k, v in out.items()
-            if k.startswith(prefix)}
+        out = {k: v for k, v in out.items() if k.startswith(prefix)}
 
     # filter: user requested only public targets
     if public:
@@ -553,11 +584,11 @@ def targets(
                 out[target]["docs"] = docs
                 out[target]["interpolated"] = True
     for k in ALL:
-        if not any([
-            out[k]['file'],
-            #out[k]['lineno'], 
-                out[k]['chain'], out[k]['docs'],]):
-            pruned[k] = out.pop(k)
+        tmp = out.get(k, {})
+        if tmp and not any(
+            [tmp.get("file", None), tmp.get("chain", []), tmp.get("docs", [])]
+        ):
+            pruned[k] = tmp
     if pruned:
         LOGGER.warning(f"pruned these targets with no details: {list(pruned.keys())}")
 
@@ -580,7 +611,7 @@ def targets(
                 fhandle.write(str_out)
                 fhandle.close()
                 # print(str_out)
-                has_glow = 0 == os.system("which glow")
+                has_glow = os.system("which glow") == 0
                 if has_glow:
                     LOGGER.warning(
                         "found that glow is installed, using it for previews"
@@ -599,21 +630,30 @@ def targets(
 
 ##░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░
 
-@click.command('database')
+
+@click.command("database")
 @click.argument("makefile")
-def database(*args, **kwargs): 
-    """ Return the database according to `make --print-data-base` """
-    print('\n'.join(_database(*args, **kwargs)))
+def database(*args, **kwargs):
+    """
+    Return the database according to `make --print-data-base`
+    """
+    print("\n".join(_database(*args, **kwargs)))
+
+
 @click.command()
 @click.argument("makefile")
-def db(*args, **kwargs): 
-    """ Alias for 'database' subcommand """
-    return print('\n'.join(_database(*args, **kwargs)))
+def db(*args, **kwargs):
+    """
+    Alias for 'database' subcommand.
+    """
+    return print("\n".join(_database(*args, **kwargs)))
+
 
 @click.command()
 @click.argument("makefile")
 def includes(makefile: str = ""):
-    """ Extract names of any included Makefiles
+    """
+    Extract names of any included Makefiles.
     """
     validate_makefile(makefile)
     with open(makefile) as fhandle:
@@ -622,12 +662,17 @@ def includes(makefile: str = ""):
         includes = [line.split()[1:] for line in includes]
     return json_output(includes)
 
+
 ##░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░
+
 
 @click.group()
 def main():
-    """ """
+    """
+    
+    """
 
-[main.add_command(x) for x in [cblocks, database,db,targets, includes]]
+
+[main.add_command(x) for x in [cblocks, database, db, targets, includes]]
 if __name__ == "__main__":
     main()

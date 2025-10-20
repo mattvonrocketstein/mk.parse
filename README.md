@@ -1,6 +1,8 @@
 # About 
 
-A makefile parser, mostly used for returning target-metadata.  Includes details about prerequisites, doc-string extraction or interpolation, and also works with targets defined via `include`'ed files.
+A makefile parser, mostly used for returning target-metadata.  Provides details about prerequisites, and doc-string extraction / interpolation, and also works with make-targets defined via `include`'ed files.  For docstrings specifically, there's some ability to return raw markdown, and display rendered markdown output (with charmbracelet/glow).
+
+This tool is self-contained script that uses `uv` for dependencies, and [optionally runs via docker](#docker).  For something a bit more involved that builds on it for more advanced reflection / automatic help capabilties, see the [compose.mk](https://robot-wranglers.github.io/compose.mk/) which uses this one.
 
 # Subcommands 
 
