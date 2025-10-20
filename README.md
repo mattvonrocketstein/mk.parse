@@ -1,8 +1,22 @@
 # About 
 
-A makefile parser, mostly used for returning target-metadata.  Provides details about prerequisites, and doc-string extraction / interpolation, and also works with make-targets defined via `include`'ed files.  For docstrings specifically, there's some ability to return raw markdown, and display rendered markdown output (with charmbracelet/glow).
+`mk.parse` is a makefile parser, mostly used for returning target-metadata, usually returning JSON.
 
-This tool is self-contained script that uses `uv` for dependencies, and [optionally runs via docker](#docker).  For something a bit more involved that builds on it for more advanced reflection / automatic help capabilties, see the [compose.mk](https://robot-wranglers.github.io/compose.mk/) which uses this one.
+This tool is self-contained script that uses `uv` for dependencies, and [optionally runs via docker](#docker).  For something a bit more involved that builds on it to add more advanced reflection / automatic "help" capabilties, see [compose.mk](https://robot-wranglers.github.io/compose.mk/cli-help) which uses this.
+
+# Features
+
+* Extracts details about line-numbers, target headers/bodies, prerequisites, etc
+* Support for parametric targets, and their users (aka "implementors")
+* Filter targets by type or by prefix, constraining output
+* Extracts python-style docstrings from target bodies.
+* Supports docstring-interpolation (aka a reasonable summary in case no docstring is present).
+* Metadata includes tags that indicate whether target is local vs included, private vs public.
+* Metadata includes tags that indicate whether target parametric, implicit, explicit, dynamic.
+
+Other helpers for extracting only includes, variables, or aggregate statistics about targets are also available.
+
+The killer feature though?  Docstrings can use markdown, and docstrings+metadata can be combined to generate more markdown.  Combined with target slicing and filtering, plus the ability to *render* markdown with charmbracelet/glow, this is a recipe for for **auto-generating fairly complete documentation and/or displaying help interactively**. 
 
 # Subcommands 
 

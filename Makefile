@@ -45,7 +45,10 @@ install:
 	&& cp ./src/mk.parse.py /usr/local/bin/mk.parse
 
 test: flux.stage/test
+	@# Tests the `mk.parse` script directly as well as the docker container
 	./src/mk.parse.py cblocks Makefile
+	./src/mk.parse.py stats Makefile
+	./src/mk.parse.py targets Makefile
 	args='targets Makefile' && ${dexec}
 	args='targets Makefile --locals' && ${dexec}
 	args='targets Makefile --public' && ${dexec}

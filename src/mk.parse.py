@@ -40,7 +40,9 @@ No documentation available.
 stderr = CONSOLE = Console(stderr=True)
 _recipe_pattern = "#  recipe to execute (from '"
 _variables_pattern = "# Variables"
+_variables_end_pattern = "# variable set hash-table stats:"
 _ht_stats_pattern = "# files hash-table stats:"
+PRIVATE_PREFIXES = "self .".split()
 
 
 def get_logger(name, console=stderr):
@@ -63,7 +65,7 @@ def get_logger(name, console=stderr):
     )
     log_handler.setFormatter(formatter)
     logger = logging.getLogger(name)
-    logger.setLevel(os.environ.get("MKPARSE_LOG_LEVEL", "warn".upper()))
+    logger.setLevel(os.environ.get("MKPARSE_LOG_LEVEL", "warn").upper())
     return logger
 
 
@@ -264,18 +266,71 @@ def cblocks(
     help="Use abs-paths in metadata (default is relative)",
 )
 @click.option(
+    "--dynamic",
+    is_flag=True,
+    default=False,
+    help="Returns dynamically-generated targets only",
+)
+@click.option(
+    "--implicit", is_flag=True, default=False, help="Returns implicit targets only"
+)
+@click.option(
     "--names-only", is_flag=True, default=False, help="Returns names only (no metadata)"
 )
 @click.option(
     "--preview", is_flag=True, default=False, help="Pretty-printer (implies --markdown)"
 )
 @click.argument("makefile")
-def targets(
+def targets(*args, **kwargs):
+    """
+    Parse Makefile to JSON.
+
+    Includes targets/prereqs details and documentation.
+    """
+    markdown = kwargs["markdown"]
+    preview = kwargs["preview"]
+    names_only = kwargs["names_only"]
+    out = _targets(*args, **kwargs)
+    # user requested only target-names
+    if names_only:
+        return print("\n".join(out.keys()))
+
+    # user requested markdown output, not json
+    if markdown:
+        template = jinja2.Template(DOCS_TEMPLATE)
+        str_out = ""
+        for target in out:
+            str_out += "\n" + template.render(target=target, **out[target])
+        if preview:
+            glow_img = "charmcli/glow:v1.5.1"
+            glow_theme = "dracula"
+            with tempfile.TemporaryDirectory() as tmpdir:
+                path = os.path.join(tmpdir, "cache.json")
+                with open(path, "w") as fhandle:
+                    fhandle.write(str_out)
+                has_glow = os.system("which glow") == 0
+                if has_glow:
+                    LOGGER.info("found that glow is installed, using it for previews")
+                    cmd = f"cat  {path} | glow -s dracula"
+                else:
+                    LOGGER.info("glow is missing, using docker version")
+                    cmd = f"cat  {path} | docker run -q -i -v {tmpdir}:{tmpdir}  {glow_img} -s {glow_theme}"
+                LOGGER.info(f"cmd: \n{cmd}")
+                os.system(cmd)
+        else:
+            print(str_out)
+    else:
+        json_output(out)
+
+
+def _targets(
     makefile: str = None,
     target: str = "",
     prefix: str = "",
     body: bool = False,
     interpolate: bool = False,
+    implicit: bool = False,
+    dynamic: bool = False,
     locals: bool = False,
     abs_paths: bool = True,
     local: bool = False,
@@ -290,9 +345,7 @@ def targets(
     **kwargs,
 ):
     """
-    Parse Makefile to JSON.
-
-    Includes targets/prereqs details and documentation.
+    
     """
     markdown = markdown or preview
     locals = locals or local
@@ -303,9 +356,6 @@ def targets(
         assert not any([markdown, preview]), err + f"{markdown,preview}"
 
     def _test(x):
-        """
-        
-        """
         tests = [
             ":" in x.strip(),
             not x.startswith("#"),
@@ -392,11 +442,6 @@ def targets(
             body=target_body,
             makefile=makefile,
         )
-        # file can maybe still be wrong in the makefile database?, depends how include happened..
-        if file == makefile and not re.findall(
-            rf"^{target_name}:.*", raw_content, re.MULTILINE
-        ):
-            file = None
 
         # user requested absolute-paths
         if file and not abs_paths:
@@ -431,12 +476,18 @@ def targets(
             "type": type,
             "docs": [x[len("\t@#") :] for x in target_body if x.startswith("\t@#")],
             "prereqs": list(set(prereqs)),
+            "local": file == makefile,
+            "private": any(target_name.startswith(x) for x in PRIVATE_PREFIXES),
         }
-        if "skip" in target_name:
-            raise Exception([tline, target, out[target_name]])
+        out[target_name].update(public=not out[target_name]["private"])
         if type == "implicit":
             regex = target_name.replace("%", ".*")
-            out[target_name].update(regex=regex)
+            out[target_name].update(regex=regex, implicit=True)
+            if file == makefile and not re.findall(
+                rf"^{target_name}:.*", raw_content, re.MULTILINE
+            ):
+                out[target_name].update(dynamic=True)
+
     for target_name, tmeta in out.items():
         if "regex" in tmeta:
             implementors = []
@@ -466,13 +517,14 @@ def targets(
         # if this is a simple alias with no docs, pull the docs from the principal
         if not tmeta["docs"] and tmeta["chain"]:
             out[target_name]["docs"] = out[tmeta["chain"]]["docs"]
+
         # user requested enriching docs with markdown
         if markdown:
             docs = out[target_name]["docs"]
             zmd = zip_markdown(docs)
             out[target_name]["docs"] = [] if not any(zmd) else zmd
 
-    # user requested target aliases should be treated
+    # autodocs for target aliases
     if parse_target_aliases:
         tmp = {}
         for aliases_maybe, v in out.items():
@@ -494,6 +546,16 @@ def targets(
         out = tmp
     ALL = out.copy()
 
+    # filter: user requested only implicits
+    if implicit:
+        LOGGER.info("Excluding non-implicit targets..")
+        out = {k: v for k, v in out.items() if v.get("implicit", False) is True}
+
+    # filter: user requested only dynamic
+    if dynamic:
+        LOGGER.info("Excluding non-implicit targets..")
+        out = {k: v for k, v in out.items() if v.get("dynamic", False) is True}
+
     # filter: user requested only parametrics
     if parametrics:
         LOGGER.info("Excluding non-parametric targets..")
@@ -509,34 +571,40 @@ def targets(
     # filter: only local targets
     if locals:
         LOGGER.info("Excluding nonlocal targets..")
-        tmp = {}
-        for k, v in out.items():
-            if v["file"] == makefile:
-                tmp[k] = v
-        out = tmp
+        out = {k: v for k, v in out.items() if v.get("local", False) is True}
+        # tmp = {}
+        # for k, v in out.items():
+        #     if v["file"] == makefile:
+        #         tmp[k] = v
+        # out = tmp
 
     # user requested target-search
     # NB: this changes the response schema!
     if target:
         out = out.get(target, {})
 
+    # filter: used requested only targets with given prefix
     if prefix:
         out = {k: v for k, v in out.items() if k.startswith(prefix)}
 
     # filter: user requested only public targets
     if public:
+        LOGGER.info("Excluding private targets..")
         out = {
             k: v
             for k, v in out.items()
-            if not any(k.startswith(x) for x in "self .".split())
+            if not any(k.startswith(x) for x in PRIVATE_PREFIXES)
         }
+
     # filter: user requested only private targets
     if private:
-        out = {
-            k: v
-            for k, v in out.items()
-            if any(k.startswith(x) for x in "self .".split())
-        }
+        LOGGER.info("Excluding public targets..")
+        out = {k: v for k, v in out.items() if v.get("private", False) is True}
+        # out = {
+        #     k: v
+        #     for k, v in out.items()
+        #     if any(k.startswith(x) for x in PRIVATE_PREFIXES)
+        # }
 
     # enrichment: user requested interpolated docs
     if interpolate:
@@ -584,36 +652,7 @@ def targets(
     if pruned:
         LOGGER.warning(f"pruned these targets with no details: {list(pruned.keys())}")
 
-    # user requested only target-names
-    if names_only:
-        return print("\n".join(out.keys()))
-
-    # user requested markdown output, not json
-    if markdown:
-        template = jinja2.Template(DOCS_TEMPLATE)
-        str_out = ""
-        for target in out:
-            str_out += "\n" + template.render(target=target, **out[target])
-        if preview:
-            glow_img = "charmcli/glow:v1.5.1"
-            glow_theme = "dracula"
-            with tempfile.TemporaryDirectory() as tmpdir:
-                path = os.path.join(tmpdir, "cache.json")
-                with open(path, "w") as fhandle:
-                    fhandle.write(str_out)
-                has_glow = os.system("which glow") == 0
-                if has_glow:
-                    LOGGER.info("found that glow is installed, using it for previews")
-                    cmd = f"cat  {path} | glow -s dracula"
-                else:
-                    LOGGER.info("glow is missing, using docker version")
-                    cmd = f"cat  {path} | docker run -q -i -v {tmpdir}:{tmpdir}  {glow_img} -s {glow_theme}"
-                LOGGER.info(f"cmd: \n{cmd}")
-                os.system(cmd)
-        else:
-            print(str_out)
-    else:
-        json_output(out)
+    return out
 
 
 # Ancillary click commands
@@ -639,18 +678,102 @@ def db(*args, **kwargs):
     return print("\n".join(_database(*args, **kwargs)))
 
 
+import typing
+
+
 @click.command()
 @click.argument("makefile")
-def includes(makefile: str = ""):
+def includes(*args, **kwargs):
     """
     Extract names of any included Makefiles.
     """
+    return json_output(_includes(*args, **kwargs))
+
+
+def _includes(makefile: str = ""):
     validate_makefile(makefile)
     with open(makefile) as fhandle:
         lines = fhandle.readlines()
         includes = [line for line in lines if line.startswith("include ")]
-        includes = [line.split()[1:] for line in includes]
-    return json_output(includes)
+        includes = [" ".join(line.split()[1:]) for line in includes]
+    return includes
+
+
+@click.command()
+@click.argument("makefile")
+def stats(*args, **kwargs):
+    """
+    Returns various statistics.
+    """
+    return json_output(_stats(*args, **kwargs))
+
+
+def _vars(*args, **kwargs):
+    db = _database(*args, **kwargs)
+    variables_start = db.index(_variables_pattern)
+    variables_end = db.index(_variables_end_pattern)
+    text = "\n".join(db[variables_start:variables_end])
+    p1 = re.compile(r"[#] makefile [(]from .*, line \d+[)]")
+    p2 = re.compile("[#] environment")
+    key1 = "makefile"
+    key2 = "environment"
+    result = {key1: [], key2: []}
+    matches = []
+    for match in p1.finditer(text):
+        matches.append((match.end(), key1))
+    for match in p2.finditer(text):
+        matches.append((match.end(), key2))
+    matches.sort(key=lambda x: x[0])
+    for i, (pos, pattern_key) in enumerate(matches):
+        if i + 1 < len(matches):
+            # Extract text from current match end to next match start
+            next_match_start = matches[i + 1][0]
+            # Find where the next pattern actually starts (before its end position)
+            next_pattern = matches[i + 1][1]
+            next_pattern_obj = p1 if next_pattern == key1 else p2
+
+            # Search backwards from next match end to find match start
+            for m in next_pattern_obj.finditer(text[:next_match_start]):
+                pass  # Get last match before next_match_start
+            block = (
+                text[pos : m.start()] if "m" in locals() else text[pos:next_match_start]
+            )
+            result[pattern_key].append(block)
+        else:
+            # Last match - extract to end of string
+            result[pattern_key].append(text[pos:])
+    data = collections.defaultdict(dict)
+    for sect in result["makefile"]:
+        if sect.startswith("\ndefine"):
+            sect = sect.lstrip()
+            name = sect.split()[2]
+            data["defines"][name] = sect
+        else:
+            sect = sect.lstrip()
+            bits = sect.split()
+            lhs = bits[0]
+            assn = bits[1]
+            assert assn in ":= =".split(), assn
+            rhs = bits[2:]
+            data[assn][lhs] = " ".join(rhs)
+    return data
+
+
+def _stats(*args, **kwargs) -> typing.Dict:
+    # validate_makefile(makefile)
+    data = _targets(*args, **kwargs)
+    out = collections.defaultdict(int)
+    for k, v in data.items():
+        for attr in "dynamic implicit private public local".split():
+            if v.get(attr):
+                out[attr] += 1
+    out.update(count=len(data))
+    includes = _includes(*args, **kwargs)
+    tmp = {k: len(v) for k, v in _vars(*args, **kwargs).items()}
+    # dict(count=len(simple_vars))
+    return dict(
+        vars=tmp, targets=out, includes=dict(files=includes, count=len(includes))
+    )
 
 
 ##░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░
@@ -663,7 +786,7 @@ def main():
     """
 
 
-[main.add_command(x) for x in [cblocks, database, db, targets, includes]]
+[main.add_command(x) for x in [stats, cblocks, database, db, targets, includes]]
 
 if __name__ == "__main__":
     main()
