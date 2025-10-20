@@ -19,6 +19,10 @@ import jinja2
 from rich.console import Console
 from rich.logging import RichHandler
 
+## Constants and 3rd-Party
+##░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░
+
+
 DOCS_TEMPLATE = """
 [`{{target}}`](#) *(via {{file}}:{{lineno}})*
 
@@ -37,15 +41,18 @@ No documentation available.
 -----------------------
 """
 
-stderr = CONSOLE = Console(stderr=True)
+PRIVATE_PREFIXES = "self .".split()
+CONSOLE = Console(stderr=True)
 _recipe_pattern = "#  recipe to execute (from '"
 _variables_pattern = "# Variables"
 _variables_end_pattern = "# variable set hash-table stats:"
 _ht_stats_pattern = "# files hash-table stats:"
-PRIVATE_PREFIXES = "self .".split()
+
+## Logging
+##░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░
 
 
-def get_logger(name, console=stderr):
+def get_logger(name, console=CONSOLE):
     log_handler = RichHandler(
         rich_tracebacks=True,
         console=console,
@@ -69,10 +76,10 @@ def get_logger(name, console=stderr):
     return logger
 
 
-##░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░
-
-
 LOGGER = get_logger(__name__)
+
+# Boring Helpers
+##░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░
 
 
 def json_output(out):
@@ -93,13 +100,15 @@ def validate_makefile(makefile: str, strict: bool = False):
     tmp = Path(makefile)
     if not all(
         [
-            tmp.exists,
-            tmp.is_file,
+            tmp.exists(),
+            tmp.is_file(),
         ]
     ):
-        raise ValueError(f"{makefile} does not exist")
+        err = f"File @ `{makefile}` does not exist"
+        LOGGER.critical(err)
+        raise ValueError(err)
     else:
-        LOGGER.info(f"parsing makefile @ {makefile}")
+        LOGGER.debug(f"parsing makefile @ {makefile}")
 
 
 def _get_provenance_line(body):
@@ -120,110 +129,61 @@ def _get_file(body=None, makefile=None):
         return str(makefile)
 
 
-def _database(makefile: str = "", make="make") -> typing.List[str]:
-    """
-    Get database for Makefile (This output comes from 'make
-    --print-data-base') # FIXME: nix the temporary file and use
-    streams.
-    """
-    LOGGER.debug(f"building database for {makefile}")
-    validate_makefile(makefile)
-    cmd = f"{make} --print-data-base -pqRrs -f {makefile} > .tmp.mk.db 2>/dev/null"
-    os.system(cmd)
-    with open(".tmp.mk.db") as fhandle:
-        out = fhandle.read().split("\n")
-    os.remove(".tmp.mk.db")
-    return out
+def zip_markdown(docs):
+    if isinstance(docs, (list,)):
+        docs = "\n".join(docs)
+        pattern = r"(^.*?(?:USAGE|EXAMPLE):.*$)\n((?:[ \t]+.+\n?)+)"
+
+        def replacer(match):
+            header = match.group(1)
+            indented_block = match.group(2)
+            # Remove trailing newline from block if present to avoid extra spacing
+            indented_block = indented_block.rstrip("\n")
+            return f"{header}\n```\n{indented_block}\n```\n"
+
+        result = re.sub(pattern, replacer, docs, flags=re.MULTILINE)
+        result = re.sub(r"\n{2,}", "\n\n", result)
+        return result.split("\n")
 
 
+## Targets Entrypoint
 ##░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░
 
-
-@click.command()
-@click.argument("makefile")
-@click.option(
-    "--pattern",
-    default="",
-    help="Pattern to look for in keys",
-)
-@click.option(
-    "--lucky",
+o_locals = click.option(
+    "-l",
+    "--locals",
     is_flag=True,
     default=False,
-    help="Pattern to look for in keys",
+    help="Filter for local targets only (no includes)",
 )
-def cblocks(
-    makefile: str = None,
-    pattern: str = "",
-    lucky: bool = False,
-    start_check=lambda s: any([s.startswith(x) for x in ["## BEGIN:", "# BEGIN:"]]),
-    end_check=lambda s: any([not s.strip(), not s.startswith("#")]),
-):
-    """
-    Extract labeled comment-blocks.
-    """
-    blocks = collections.defaultdict(list)
-    with open(makefile) as fhandle:
-        lines = fhandle.readlines()
-        for i, line in enumerate(lines):
-            if start_check(line):
-                label = line.split("BEGIN:")[-1].strip()
-                for j in range(i + 1, len(lines)):
-                    k = lines[j].strip()
-                    is_div = all(
-                        [
-                            len(k) > 3,
-                            not k.replace("#", "")
-                            .replace("-", "")
-                            .replace("_", "")
-                            .replace("░", "")
-                            .strip(),
-                        ]
-                    )
-                    if is_div or end_check(k):
-                        break
-                    else:
-                        k = k[1:]
-                        if k.startswith("#"):
-                            k = k[1:].strip()
-                        blocks[label].append(k)
-    out = blocks
-    if pattern:
-        tmp = {}
-        for k in blocks:
-            if re.match(f".*{pattern}.*", k):
-                tmp[k] = blocks[k]
-        out = tmp
-    if lucky:
-        out = list(out.items())
-        out = out[0] if out else None
-        out = dict(label=out[0], block=out[1]) if out else None
-    return json_output(out)
-
-
-## Primary click command for `targets`
-##░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░
+o_local = click.option(
+    "--local", is_flag=True, default=False, help="Alias for --locals"
+)
 
 
 @click.command()
+@o_local
+@o_locals
 @click.option("--target", help="Retrieves help for named target only")
 @click.option(
+    "-m",
     "--markdown",
     is_flag=True,
     default=False,
-    help="Enriches docs by guessing at markdown formatting",
+    help="Returns raw markdown instead of JSON",
 )
 @click.option(
+    "-b",
     "--body",
     is_flag=True,
     default=False,
-    help="Enriches docs by guessing at markdown formatting",
+    help="Adds target-bodies to output JSON",
 )
 @click.option(
     "--public",
     is_flag=True,
     default=False,
-    help="Filter for public targets only (no prefix in {self|.})",
+    help="Filter for public targets only (prefix NOT in {self|.})",
 )
 @click.option(
     "--private",
@@ -232,21 +192,16 @@ def cblocks(
     help="Filter for private targets only (prefix in {self|.})",
 )
 @click.option(
-    "--locals",
-    is_flag=True,
-    default=False,
-    help="Filter for local targets only (no includes)",
-)
-@click.option(
+    "-p",
     "--prefix",
     default="",
     help="Prefix to filter for",
 )
-@click.option("--local", is_flag=True, default=False, help="Alias for --locals")
 @click.option(
-    "--interpolate", is_flag=True, default=False, help="Interpolate docstrings"
+    "-i", "--interpolate", is_flag=True, default=False, help="Interpolate docstrings"
 )
 @click.option(
+    "-s",
     "--shallow",
     is_flag=True,
     default=False,
@@ -263,9 +218,10 @@ def cblocks(
     "--abs-paths",
     is_flag=True,
     default=False,
-    help="Use abs-paths in metadata (default is relative)",
+    help="Use absolute-paths in metadata (default is relative)",
 )
 @click.option(
+    "-d",
     "--dynamic",
     is_flag=True,
     default=False,
@@ -275,20 +231,28 @@ def cblocks(
     "--implicit", is_flag=True, default=False, help="Returns implicit targets only"
 )
 @click.option(
-    "--names-only", is_flag=True, default=False, help="Returns names only (no metadata)"
+    "-n",
+    "--names-only",
+    is_flag=True,
+    default=False,
+    help="Returns names only (no metadata)",
 )
 @click.option(
-    "--preview", is_flag=True, default=False, help="Pretty-printer (implies --markdown)"
+    "-x",
+    "--preview",
+    is_flag=True,
+    default=False,
+    help="Pretty-printer for console (implies --markdown)",
 )
 @click.argument("makefile")
 def targets(*args, **kwargs):
     """
-    Parse Makefile to JSON.
-
-    Includes targets/prereqs details and documentation.
+    Parse Makefile targets to JSON, slice targets by prefix, show
+    documentation for targets, etc.
     """
     markdown = kwargs["markdown"]
     preview = kwargs["preview"]
+    markdown = markdown or preview
     names_only = kwargs["names_only"]
     out = _targets(*args, **kwargs)
     # user requested only target-names
@@ -363,23 +327,6 @@ def _targets(
         ]
         return all(tests)
 
-    def zip_markdown(docs):
-        if isinstance(docs, (list,)):
-            docs = "\n".join(docs)
-            pattern = r"(^.*?(?:USAGE|EXAMPLE):.*$)\n((?:[ \t]+.+\n?)+)"
-
-            def replacer(match):
-                header = match.group(1)
-                indented_block = match.group(2)
-                # Remove trailing newline from block if present to avoid extra spacing
-                indented_block = indented_block.rstrip("\n")
-                return f"{header}\n```\n{indented_block}\n```\n"
-
-            result = re.sub(pattern, replacer, docs, flags=re.MULTILINE)
-            result = re.sub(r"\n{2,}", "\n\n", result)
-            return result.split("\n")
-
-    assert makefile and os.path.exists(makefile), f"file @ {makefile} does not exist"
     if shallow:
         LOGGER.warning(f"Parsing {makefile} in shallow-mode!")
         LOGGER.warning(
@@ -396,8 +343,10 @@ def _targets(
             for line in lines
             if re.match(r"^[a-zA-Z-_/]+[:][^=]", line)
         ]
-        return json_output(lines)
+        return lines
     db = _database(makefile, **kwargs)
+    raw_db = "\n".join(db)
+    validate_makefile(makefile)
     with open(makefile) as fhandle:
         raw_content = fhandle.read()
     original = raw_content.split("\n")
@@ -424,8 +373,13 @@ def _targets(
     targets = [t for t in targets if t != f"{makefile}:"]
     for tline in targets:
         if any(
-            [tline.startswith(" ")]
-            + [tline.startswith(x) for x in "$ @ & \t".split(" ")]
+            [
+                tline.startswith(" "),
+            ]
+            + [
+                tline.startswith(x)
+                for x in "$ @ & \t".split(" ") + ".SUFFIXES: .INTERMEDIATE:".split()
+            ]
             + [";" in tline]
         ):
             continue
@@ -453,7 +407,7 @@ def _targets(
             # take advice from make's database.
             # we return this because it's authoritative,
             # but actually sometimes it's wrong.  this returns
-            # the first like of the target that's tab-indented,
+            # the first line of the target that's tab-indented,
             # but sometimes make macros like `ifeq` are not indented..
             lineno = pline.split("', line ")[-1].split("):")[0]
         else:
@@ -466,6 +420,27 @@ def _targets(
         lineno = lineno and (int(lineno) - 1)
         prereqs = [x for x in childs.split() if x.strip()]
         header = target_body.pop(0)
+
+        # This is probably an invocation of a parametric target?
+        if f"\n# Not a target:\n{target_name}:\n" in raw_db:
+            continue
+
+        # FIXME: determining locality is still buggy for complex scenarios, multiple includes, etc
+        is_local = file == makefile
+        if (
+            is_local
+            and type != "implicit"
+            and not re.findall(
+                r"^" + target_name + r"(?: [a-zA-Z\-_/]+)*:.*",
+                raw_content,
+                re.MULTILINE,
+            )
+        ):
+            LOGGER.debug(f"revoking local: {target_name}")
+            is_local = False
+        target_docs = [x[len("\t@#") :] for x in target_body if x.startswith("\t@#")]
+        if target_docs and target_docs[-1] == "":
+            target_docs.pop(-1)
         out[target_name] = {
             "file": file,
             "lineno": lineno,
@@ -474,19 +449,22 @@ def _targets(
             "parametric": "%" in target_name,
             "chain": None,
             "type": type,
-            "docs": [x[len("\t@#") :] for x in target_body if x.startswith("\t@#")],
+            "docs": target_docs,
             "prereqs": list(set(prereqs)),
-            "local": file == makefile,
+            "local": is_local,
             "private": any(target_name.startswith(x) for x in PRIVATE_PREFIXES),
         }
-        out[target_name].update(public=not out[target_name]["private"])
         if type == "implicit":
             regex = target_name.replace("%", ".*")
             out[target_name].update(regex=regex, implicit=True)
             if file == makefile and not re.findall(
-                rf"^{target_name}:.*", raw_content, re.MULTILINE
+                # rf"^{target_name}:.*", raw_content, re.MULTILINE
+                r"^" + target_name + r"(?: [a-zA-Z\-_/]+)*:.*",
+                raw_content,
+                re.MULTILINE,
             ):
                 out[target_name].update(dynamic=True)
+                # out['local']
 
     for target_name, tmeta in out.items():
         if "regex" in tmeta:
@@ -516,7 +494,7 @@ def _targets(
     for target_name, tmeta in out.items():
         # if this is a simple alias with no docs, pull the docs from the principal
         if not tmeta["docs"] and tmeta["chain"]:
-            out[target_name]["docs"] = out[tmeta["chain"]]["docs"]
+            out[target_name]["docs"] = out.get(tmeta["chain"], {}).get("docs", [])
 
         # user requested enriching docs with markdown
         if markdown:
@@ -572,11 +550,6 @@ def _targets(
     if locals:
         LOGGER.info("Excluding nonlocal targets..")
         out = {k: v for k, v in out.items() if v.get("local", False) is True}
-        # tmp = {}
-        # for k, v in out.items():
-        #     if v["file"] == makefile:
-        #         tmp[k] = v
-        # out = tmp
 
     # user requested target-search
     # NB: this changes the response schema!
@@ -590,21 +563,12 @@ def _targets(
     # filter: user requested only public targets
     if public:
         LOGGER.info("Excluding private targets..")
-        out = {
-            k: v
-            for k, v in out.items()
-            if not any(k.startswith(x) for x in PRIVATE_PREFIXES)
-        }
+        out = {k: v for k, v in out.items() if v.get("private", False) is False}
 
     # filter: user requested only private targets
     if private:
         LOGGER.info("Excluding public targets..")
         out = {k: v for k, v in out.items() if v.get("private", False) is True}
-        # out = {
-        #     k: v
-        #     for k, v in out.items()
-        #     if any(k.startswith(x) for x in PRIVATE_PREFIXES)
-        # }
 
     # enrichment: user requested interpolated docs
     if interpolate:
@@ -652,10 +616,16 @@ def _targets(
     if pruned:
         LOGGER.warning(f"pruned these targets with no details: {list(pruned.keys())}")
 
+    out = dict(
+        sorted(
+            out.items(),
+            key=lambda x: x[1]["lineno"] if x[1]["lineno"] is not None else -1,
+        )
+    )
     return out
 
 
-# Ancillary click commands
+## DB Entrypoint
 ##░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░
 
 
@@ -663,10 +633,27 @@ def _targets(
 @click.argument("makefile")
 def database(*args, **kwargs):
     """
-    Get database for Makefile (This output comes from 'make
-    --print-data-base')
+    Get database for the Makefile.
+
+    This output comes from 'make --print-data-base'
     """
     print("\n".join(_database(*args, **kwargs)))
+
+
+def _database(makefile: str = "", make="make") -> typing.List[str]:
+    """
+    Get database for Makefile (This output comes from 'make
+    --print-data-base') # FIXME: nix the temporary file and use
+    streams.
+    """
+    LOGGER.debug(f"building database for {makefile}")
+    validate_makefile(makefile)
+    cmd = f"{make} --print-data-base -pqRrs -f {makefile} > .tmp.mk.db 2>/dev/null"
+    os.system(cmd)
+    with open(".tmp.mk.db") as fhandle:
+        out = fhandle.read().split("\n")
+    os.remove(".tmp.mk.db")
+    return out
 
 
 @click.command()
@@ -676,9 +663,6 @@ def db(*args, **kwargs):
     Alias for 'database' subcommand.
     """
     return print("\n".join(_database(*args, **kwargs)))
-
-
-import typing
 
 
 @click.command()
@@ -699,6 +683,10 @@ def _includes(makefile: str = ""):
     return includes
 
 
+## Stats Entrypoint
+##░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░
+
+
 @click.command()
 @click.argument("makefile")
 def stats(*args, **kwargs):
@@ -708,7 +696,41 @@ def stats(*args, **kwargs):
     return json_output(_stats(*args, **kwargs))
 
 
-def _vars(*args, **kwargs):
+def _stats(*args, **kwargs) -> typing.Dict:
+    data = _targets(*args, **kwargs)
+    out = collections.defaultdict(int)
+    for _k, v in data.items():
+        for attr in "dynamic implicit private local".split():
+            if v.get(attr):
+                out[attr] += 1
+    out.update(count=len(data))
+    includes = _includes(*args, **kwargs)
+    tmp = {k: len(v) for k, v in _vars(*args, **kwargs).items()}
+    return dict(
+        targets=out, vars=tmp, includes=dict(files=includes, count=len(includes))
+    )
+
+
+## Vars Entrypoint
+##░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░
+
+
+@click.command()
+@o_local
+@click.argument("makefile")
+def vars(*args, **kwargs):
+    """
+    Details about variables and assignments.
+    """
+    return json_output(_vars(*args, **kwargs))
+
+
+def _vars(*args, **kwargs) -> typing.Dict:
+    """
+    Extract variables and assignment metadata.
+    """
+    makefile = kwargs["makefile"]
+    local = kwargs.pop("local", False)
     db = _database(*args, **kwargs)
     variables_start = db.index(_variables_pattern)
     variables_end = db.index(_variables_end_pattern)
@@ -725,22 +747,27 @@ def _vars(*args, **kwargs):
         matches.append((match.end(), key2))
     matches.sort(key=lambda x: x[0])
     for i, (pos, pattern_key) in enumerate(matches):
+        if not var_is_local(
+            pattern_key=pattern_key, pos=pos, makefile=makefile, text=text, local=local
+        ):
+            continue
+        # Extract text from current match end to next match start
+        # Find where the next pattern actually starts (before its end position)
+        # Search backwards from next match end to find match start
         if i + 1 < len(matches):
-            # Extract text from current match end to next match start
             next_match_start = matches[i + 1][0]
-            # Find where the next pattern actually starts (before its end position)
             next_pattern = matches[i + 1][1]
             next_pattern_obj = p1 if next_pattern == key1 else p2
-
-            # Search backwards from next match end to find match start
-            for m in next_pattern_obj.finditer(text[:next_match_start]):
+            for _m in next_pattern_obj.finditer(text[:next_match_start]):
                 pass  # Get last match before next_match_start
             block = (
-                text[pos : m.start()] if "m" in locals() else text[pos:next_match_start]
+                text[pos : _m.start()]
+                if "_m" in locals()
+                else text[pos:next_match_start]
             )
             result[pattern_key].append(block)
+        # Last match - extract to end of string
         else:
-            # Last match - extract to end of string
             result[pattern_key].append(text[pos:])
     data = collections.defaultdict(dict)
     for sect in result["makefile"]:
@@ -753,29 +780,103 @@ def _vars(*args, **kwargs):
             bits = sect.split()
             lhs = bits[0]
             assn = bits[1]
-            assert assn in ":= =".split(), assn
+            assert assn in [
+                ":=",
+                "=",
+            ], f"expected assignment would be := or =, got {assn}"
             rhs = bits[2:]
             data[assn][lhs] = " ".join(rhs)
     return data
 
 
-def _stats(*args, **kwargs) -> typing.Dict:
-    # validate_makefile(makefile)
-    data = _targets(*args, **kwargs)
-    out = collections.defaultdict(int)
-    for k, v in data.items():
-        for attr in "dynamic implicit private public local".split():
-            if v.get(attr):
-                out[attr] += 1
-    out.update(count=len(data))
-    includes = _includes(*args, **kwargs)
-    tmp = {k: len(v) for k, v in _vars(*args, **kwargs).items()}
-    # dict(count=len(simple_vars))
-    return dict(
-        vars=tmp, targets=out, includes=dict(files=includes, count=len(includes))
-    )
+def var_is_local(
+    pos: int = -1,
+    makefile: str = "",
+    pattern_key: str = "",
+    text: str = "",
+    local: bool = False,
+):
+    """
+    Everything is local if locals weren't requested, If only
+    local vars requested, check file provenance and answer.
+    """
+    if not local:
+        return True
+    if pattern_key == "makefile":
+        pline = text[text[:pos].rfind("\n") : pos]
+        pattern = r"[#] makefile [(]from '(?P<filename>[^']+)', line \d+[)]"
+        fname = re.search(pattern, pline).group(1)
+        if fname == makefile:
+            return True
 
 
+## Comment-Block Entrypoint
+##░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░
+
+
+@click.command()
+@click.argument("makefile")
+@click.option(
+    "--pattern",
+    default="",
+    help="Pattern to look for in keys",
+)
+@click.option(
+    "--lucky",
+    is_flag=True,
+    default=False,
+    help="Pattern to look for in keys",
+)
+def cblocks(
+    makefile: str = None,
+    pattern: str = "",
+    lucky: bool = False,
+    start_check=lambda s: any([s.startswith(x) for x in ["## BEGIN:", "# BEGIN:"]]),
+    end_check=lambda s: any([not s.strip(), not s.startswith("#")]),
+):
+    """
+    Extract labeled comment-blocks.
+    """
+    blocks = collections.defaultdict(list)
+    with open(makefile) as fhandle:
+        lines = fhandle.readlines()
+        for i, line in enumerate(lines):
+            if start_check(line):
+                label = line.split("BEGIN:")[-1].strip()
+                for j in range(i + 1, len(lines)):
+                    k = lines[j].strip()
+                    is_div = all(
+                        [
+                            len(k) > 3,
+                            not k.replace("#", "")
+                            .replace("-", "")
+                            .replace("_", "")
+                            .replace("░", "")
+                            .strip(),
+                        ]
+                    )
+                    if is_div or end_check(k):
+                        break
+                    else:
+                        k = k[1:]
+                        if k.startswith("#"):
+                            k = k[1:].strip()
+                        blocks[label].append(k)
+    out = blocks
+    if pattern:
+        tmp = {}
+        for k in blocks:
+            if re.match(f".*{pattern}.*", k):
+                tmp[k] = blocks[k]
+        out = tmp
+    if lucky:
+        out = list(out.items())
+        out = out[0] if out else None
+        out = dict(label=out[0], block=out[1]) if out else None
+    return json_output(out)
+
+
+## Final Assembly & Main Entrypoint
 ##░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░
 
 
@@ -786,7 +887,7 @@ def main():
     """
 
 
-[main.add_command(x) for x in [stats, cblocks, database, db, targets, includes]]
+[main.add_command(x) for x in [vars, stats, cblocks, database, db, targets, includes]]
 
 if __name__ == "__main__":
     main()
