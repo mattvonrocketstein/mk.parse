@@ -1,6 +1,13 @@
+
+[About](#about) | [Features](#features) | [Usage](#usage) | [Subcommands](#subcommands) | [Target metadata](#target-metadata)
+
+----------------------------------------
+
 # ABOUT
 
-`mk.parse` is a Makefile parser.  At a high level it uses `make --print-data-base` to get a normalized form, then converts those details to JSON.  But it enriches that information too which creates more interesting possibilities, like supporting docstrings, documentation-generation, and extracting target-graphs.
+`mk.parse` is a Makefile parser.
+
+At a high level it uses `make --print-data-base` to get a normalized form, then converts those details to JSON.  But it enriches that information too which creates more interesting possibilities, like supporting docstrings, documentation-generation, and extracting prerequisite-graphs.
 
 This tool is self-contained script that uses `uv` for dependencies, and [optionally runs via docker](#docker).  
 
@@ -16,11 +23,13 @@ This tool is self-contained script that uses `uv` for dependencies, and [optiona
 * Metadata includes tags that indicate whether target is local vs included, private vs public.
 * Metadata includes tags that indicate whether target parametric, implicit, explicit, dynamic.
 
-Other helpers for extracting only includes, variables, or aggregate statistics about variables/targets are also available.
+Other helpers for extracting things like includes, variables, aggregate statistics, and comment-blocks are also available, but this should be considered more experimental than the support for targets.
 
-The main use-case of this stuff is **autogenerating complete documentation, and/or displaying target-help interactively.**  This works because target-docstrings can use markdown, and those docstrings can be combined with target-metadata to make even more markdown.  For interactive help from the CLI, we can leverage the target slicing and filtering, then render pretty markdown on the console.  Rendering uses [charmbracelet/glow](#), which is bundled with the [docker container](#docker), but if you're planning to [use the script](#use-the-script) directly, you'll want to make sure it's installed.
+The main use-case is **autogenerating complete documentation, and/or displaying target-help interactively.**  This works because target-docstrings can use markdown, and those docstrings can be combined with target-metadata to make even more markdown.  
 
-For something a bit more involved that builds on it to add more advanced reflection / automatic "help" capabilties, see [compose.mk](https://robot-wranglers.github.io/compose.mk/cli-help) which uses this.
+For interactive help from the CLI, target slicing and filtering can be used, followed by rendering some pretty markdown on the console.  Rendering uses [charmbracelet/glow](https://github.com/charmbracelet/glow), which is bundled with the [docker container](#docker), but if you're planning to [use the script](#use-the-script) directly then you'll want to make sure it's installed.
+
+For something a bit more involved that builds on `mk.parse` to add more advanced reflection and automatic "help" capabilities, see [compose.mk](https://robot-wranglers.github.io/compose.mk/cli-help) which uses this.
 
 ----------------------------------------
 
@@ -31,20 +40,22 @@ For something a bit more involved that builds on it to add more advanced reflect
 If you have `uv` installed, you can run [the script](mk.parse.py) directly.  If the project's cloned already, use `sudo make install`.  Otherwise you can install manually using something like this:
 
 ```bash
-$ wget https://raw.githubusercontent.com/mattvonrocketstein/mk.parse/refs/heads/v1.2.4/mk.parse.py
+$ wget https://raw.githubusercontent.com/mattvonrocketstein/mk.parse/refs/heads/main/src/mk.parse.py
 $ mv mk.parse.py /usr/local/bin/mk.parse
 $ chmod +x /usr/local/bin/mk.parse
 
-# dependencies cached on first run
+# Dependencies downloaded/cached after first run
 mk.parse --help
 ```
 
-## Docker
+## Use Docker
+<a name=docker></a>
 
-Run the parser with docker:
+Run with docker:
 
 ```bash 
-docker run --rm -i -v `pwd`:/workspace -w/workspace ghcr.io/mattvonrocketstein/mk.parse:v1.2.4 targets Makefile
+docker run --rm -i -v `pwd`:/workspace -w/workspace \
+  ghcr.io/mattvonrocketstein/mk.parse:v1.2.4 targets Makefile
 ```
 
 ----------------------------------------
@@ -74,11 +85,14 @@ Commands:
 
 # TARGETS & METADATA
 
+Usually you want the the `targets` subcommand:
+
 ```bash
 $ mk.parse targets --help
 Usage: mk.parse.py targets [OPTIONS] MAKEFILE
 
-  Parse Makefile to JSON.  Includes targets/prereqs details and documentation.
+  Parse Makefile to JSON.  
+  Includes targets/prereqs details and documentation.
 
 Options:
   --local          Alias for --locals
@@ -119,7 +133,6 @@ $ mk.parse targets tests/sample-1.mk
     "prereqs": [],
     "local": true,
     "private": false,
-    "public": true
   },
   "build": {
     "file": "tests/sample-1.mk",
@@ -131,7 +144,6 @@ $ mk.parse targets tests/sample-1.mk
     "prereqs": ["helper1", "helper2"],
     "local": true,
     "private": false,
-    "public": true
   },
   "test": {
     "file": "tests/sample-1.mk",
@@ -143,7 +155,6 @@ $ mk.parse targets tests/sample-1.mk
     "prereqs": [],
     "local": true,
     "private": false,
-    "public": true
   },
   ..
 }
@@ -177,19 +188,29 @@ Project test
 
 ## Example Output (Rendered)
 
+A typical example of rendered output:
+
 ```bash
 $ mk.parse targets --markdown tests/sample-1.mk
 ```
 
-<img src=docs/img/example1.png>
+<img src=docs/img/example-1.png>
 
-# Config 
+Running with `--interpolate` changes some of the output, trying to improve on "No documentation available".  
+
+Afterwards the `chain-example` target above looks like this:
+
+<img src=docs/img/example-2.png>
+
+----------------------------------------
+
+# CONFIG
 
 * `MKPARSE_LOG_LEVEL`: Supports debug/info/warn/critical as usual.
 
-# Issues
+----------------------------------------
 
-# References
+# REFS
 
 * [https://www.gnu.org/software/make/manual/make.html](https://www.gnu.org/software/make/manual/make.html)
 

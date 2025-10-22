@@ -24,15 +24,14 @@ from rich.logging import RichHandler
 
 
 DOCS_TEMPLATE = """
-[`{{target}}`](#) *(via {{file}}:{{lineno}})*
+**{% if private %}▪{% else %}►{%endif%}** [`{{target}}`](#) *(via {{file}}:{{lineno}})* 
+**{%if prereqs%}├{%else%}└{%endif%}─ info:** {{'private' if private else 'public'}} **|** {{'dynamic' if dynamic else 'static'}} **|** {{'local' if local else 'include'}} 
+{%if prereqs -%}
+**└─ prereqs:** <small>{%for p in prereqs%}`{{p}}`{%if not loop.last%}, {%endif%}{%endfor%}</small> 
+{% endif %}
+{%-if docs %}
 
-{%if prereqs and not interpolated%}
-* prereqs: <small>{%for p in prereqs%}`{{p}}`{%if not loop.last%}, {%endif%}{%endfor%}</small>
-{% else %}
-{#* prereqs: *(None)*#}
-{%endif %}
-{%if docs %}
-{%for line in docs%}
+{% for line in docs-%}
 {{line}}
 {%endfor%}
 {% else %}
@@ -134,16 +133,15 @@ def zip_markdown(docs):
         docs = "\n".join(docs)
         pattern = r"(^.*?(?:USAGE|EXAMPLE):.*$)\n((?:[ \t]+.+\n?)+)"
 
-        def replacer(match):
-            header = match.group(1)
-            indented_block = match.group(2)
-            # Remove trailing newline from block if present to avoid extra spacing
-            indented_block = indented_block.rstrip("\n")
-            return f"{header}\n```\n{indented_block}\n```\n"
-
-        result = re.sub(pattern, replacer, docs, flags=re.MULTILINE)
-        result = re.sub(r"\n{2,}", "\n\n", result)
-        return result.split("\n")
+    def replacer(match):
+        header = match.group(1)
+        indented_block = match.group(2)
+        # Remove trailing newline from block if present to avoid extra spacing
+        indented_block = indented_block.rstrip("\n")
+        return f"{header}\n```\n{indented_block}\n```\n"
+    result = re.sub(pattern, replacer, docs, flags=re.MULTILINE)
+    result = re.sub(r"\n{2,}", "\n\n", result)
+    return result.split("\n")
 
 
 ## Targets Entrypoint
@@ -264,15 +262,15 @@ def targets(*args, **kwargs):
         template = jinja2.Template(DOCS_TEMPLATE)
         str_out = ""
         for target in out:
-            str_out += "\n" + template.render(target=target, **out[target])
+            str_out += template.render(target=target, **out[target])
         if preview:
             glow_img = "charmcli/glow:v1.5.1"
             glow_theme = "dracula"
+            has_glow = os.system("which glow") == 0
             with tempfile.TemporaryDirectory() as tmpdir:
-                path = os.path.join(tmpdir, "cache.json")
+                path = os.path.join(tmpdir, "cache.md")
                 with open(path, "w") as fhandle:
                     fhandle.write(str_out)
-                has_glow = os.system("which glow") == 0
                 if has_glow:
                     LOGGER.info("found that glow is installed, using it for previews")
                     cmd = f"cat  {path} | glow -s dracula"
@@ -377,8 +375,8 @@ def _targets(
                 tline.startswith(" "),
             ]
             + [
-                tline.startswith(x)
-                for x in "$ @ & \t".split(" ") + ".SUFFIXES: .INTERMEDIATE:".split()
+                tline.strip().startswith(x)
+                for x in "$ @ & \t".split(" ") + ".DEFAULT .SUFFIXES: .INTERMEDIATE:".split()
             ]
             + [";" in tline]
         ):
@@ -415,7 +413,6 @@ def _targets(
                 lineno = original.index(tline)
             except ValueError:
                 LOGGER.debug(f"cant find {tline} in {makefile}, included?")
-                # target_name
                 lineno = None
         lineno = lineno and (int(lineno) - 1)
         prereqs = [x for x in childs.split() if x.strip()]
@@ -439,6 +436,7 @@ def _targets(
             LOGGER.debug(f"revoking local: {target_name}")
             is_local = False
         target_docs = [x[len("\t@#") :] for x in target_body if x.startswith("\t@#")]
+        target_docs = [line.lstrip() if all([line.replace(' ','').startswith('|'),line.replace(' ','').endswith('|')]) else line for line in target_docs]
         if target_docs and target_docs[-1] == "":
             target_docs.pop(-1)
         out[target_name] = {
@@ -454,6 +452,7 @@ def _targets(
             "local": is_local,
             "private": any(target_name.startswith(x) for x in PRIVATE_PREFIXES),
         }
+        
         if type == "implicit":
             regex = target_name.replace("%", ".*")
             out[target_name].update(regex=regex, implicit=True)
@@ -501,7 +500,7 @@ def _targets(
             docs = out[target_name]["docs"]
             zmd = zip_markdown(docs)
             out[target_name]["docs"] = [] if not any(zmd) else zmd
-
+            
     # autodocs for target aliases
     if parse_target_aliases:
         tmp = {}
@@ -523,7 +522,7 @@ def _targets(
                 tmp[aliases_maybe] = v
         out = tmp
     ALL = out.copy()
-
+    
     # filter: user requested only implicits
     if implicit:
         LOGGER.info("Excluding non-implicit targets..")
@@ -574,20 +573,16 @@ def _targets(
     if interpolate:
         for target, data in out.items():
             if not data["docs"]:
-                LOGGER.warning(f"interpolating: {target}")
+                LOGGER.info(f"interpolating: {target}")
                 prereqs = data["prereqs"]
                 if not prereqs:
                     docs = []
                 else:
                     docs = ["Stepwise summary:\n"]
                 for i, p in enumerate(prereqs):
-                    alt = p[: p.find("/") + 1] + "%"
-                    LOGGER.warning([p, alt])
                     pdocs = ALL.get(p, {}).get("docs", [])
                     if pdocs:
                         pdocs = f"`{p}`: {' '.join(pdocs[:1])}"
-                        # pdocs = pdocs[:80]
-                        # pdocs=f'{pdocs[:pdocs.find(" ")]} .. '
                     else:
                         subs = ALL.get(p, {}).get("prereqs", [])
                         if subs:
@@ -595,8 +590,7 @@ def _targets(
                         else:
                             LOGGER.warning(f"failed retrieving docs for {target}")
                             pdocs = f"`{p}`: *(No summary available)* "
-                    these_docs = f"{i+1}. {pdocs}"  # ('\n'.join(pdocs))
-                    # doc=f"{i}. {p}\n{these_docs}"
+                    these_docs = f"{i+1}. {pdocs}"
                     docs += [these_docs]
                 if not docs:
                     docs = (
@@ -622,6 +616,7 @@ def _targets(
             key=lambda x: x[1]["lineno"] if x[1]["lineno"] is not None else -1,
         )
     )
+
     return out
 
 

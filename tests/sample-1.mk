@@ -8,19 +8,26 @@ test:
 	@# Project test
 	echo testing
 
+chain-example: clean build test
+
 helper1:
 	@# Fake helper the first
 	echo helper1
 
 helper2:
-	@# Fake helper the second
+	@# Fake helper the second, with markdown table in docstring
+	@# | Column 1      | Column 2      |
+	@# | ------------- | ------------- |
+	@# | Cell 1, Row 1 | Cell 2, Row 1 |
+	@# | Cell 1, Row 2 | Cell 1, Row 2 |
 	echo helper2
 
-parametric-target/%:
-	# Example parametric target, and bad docstrings
+parametric-target-example/%:
+	# Example parametric target, with missing/bad docstring
 
 self.private_target:
 	@# Private target, self-prefix
 
 .private_target:
 	@# Private target, dot-prefix
+
