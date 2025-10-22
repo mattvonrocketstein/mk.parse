@@ -139,6 +139,7 @@ def zip_markdown(docs):
         # Remove trailing newline from block if present to avoid extra spacing
         indented_block = indented_block.rstrip("\n")
         return f"{header}\n```\n{indented_block}\n```\n"
+
     result = re.sub(pattern, replacer, docs, flags=re.MULTILINE)
     result = re.sub(r"\n{2,}", "\n\n", result)
     return result.split("\n")
@@ -226,6 +227,13 @@ o_local = click.option(
     help="Returns dynamically-generated targets only",
 )
 @click.option(
+    "-t",
+    "--static",
+    is_flag=True,
+    default=False,
+    help="Exclude dynamically-generated targets",
+)
+@click.option(
     "--implicit", is_flag=True, default=False, help="Returns implicit targets only"
 )
 @click.option(
@@ -255,7 +263,8 @@ def targets(*args, **kwargs):
     out = _targets(*args, **kwargs)
     # user requested only target-names
     if names_only:
-        return print("\n".join(out.keys()))
+        print("\n".join(out))
+        return
 
     # user requested markdown output, not json
     if markdown:
@@ -264,9 +273,9 @@ def targets(*args, **kwargs):
         for target in out:
             str_out += template.render(target=target, **out[target])
         if preview:
-            glow_img = "charmcli/glow:v1.5.1"
-            glow_theme = "dracula"
-            has_glow = os.system("which glow") == 0
+            glow_img = os.environ.get("GLOW_IMG", "charmcli/glow:v1.5.1")
+            glow_theme = os.environ.get("GLOW_THEME", "dracula")
+            has_glow = os.system("which glow >/dev/null 2>/dev/null") == 0
             with tempfile.TemporaryDirectory() as tmpdir:
                 path = os.path.join(tmpdir, "cache.md")
                 with open(path, "w") as fhandle:
@@ -293,6 +302,7 @@ def _targets(
     interpolate: bool = False,
     implicit: bool = False,
     dynamic: bool = False,
+    static: bool = False,
     locals: bool = False,
     abs_paths: bool = True,
     local: bool = False,
@@ -376,7 +386,8 @@ def _targets(
             ]
             + [
                 tline.strip().startswith(x)
-                for x in "$ @ & \t".split(" ") + ".DEFAULT .SUFFIXES: .INTERMEDIATE:".split()
+                for x in "$ @ & \t".split(" ")
+                + ".DEFAULT .SUFFIXES: .INTERMEDIATE:".split()
             ]
             + [";" in tline]
         ):
@@ -436,9 +447,24 @@ def _targets(
             LOGGER.debug(f"revoking local: {target_name}")
             is_local = False
         target_docs = [x[len("\t@#") :] for x in target_body if x.startswith("\t@#")]
-        target_docs = [line.lstrip() if all([line.replace(' ','').startswith('|'),line.replace(' ','').endswith('|')]) else line for line in target_docs]
+
+        # dedention for tables; other cleaning
+        target_docs = [
+            (
+                line.lstrip()
+                if all(
+                    [
+                        line.replace(" ", "").startswith("|"),
+                        line.replace(" ", "").endswith("|"),
+                    ]
+                )
+                else line
+            )
+            for line in target_docs
+        ]
         if target_docs and target_docs[-1] == "":
             target_docs.pop(-1)
+
         out[target_name] = {
             "file": file,
             "lineno": lineno,
@@ -452,7 +478,7 @@ def _targets(
             "local": is_local,
             "private": any(target_name.startswith(x) for x in PRIVATE_PREFIXES),
         }
-        
+
         if type == "implicit":
             regex = target_name.replace("%", ".*")
             out[target_name].update(regex=regex, implicit=True)
@@ -500,7 +526,7 @@ def _targets(
             docs = out[target_name]["docs"]
             zmd = zip_markdown(docs)
             out[target_name]["docs"] = [] if not any(zmd) else zmd
-            
+
     # autodocs for target aliases
     if parse_target_aliases:
         tmp = {}
@@ -522,16 +548,20 @@ def _targets(
                 tmp[aliases_maybe] = v
         out = tmp
     ALL = out.copy()
-    
+
     # filter: user requested only implicits
     if implicit:
-        LOGGER.info("Excluding non-implicit targets..")
+        LOGGER.info("Excluding implicit targets..")
         out = {k: v for k, v in out.items() if v.get("implicit", False) is True}
 
     # filter: user requested only dynamic
     if dynamic:
-        LOGGER.info("Excluding non-implicit targets..")
+        LOGGER.info("Excluding static targets..")
         out = {k: v for k, v in out.items() if v.get("dynamic", False) is True}
+
+    if static:
+        LOGGER.info("Excluding dynamic targets..")
+        out = {k: v for k, v in out.items() if v.get("dynamic", False) is False}
 
     # filter: user requested only parametrics
     if parametrics:
@@ -616,7 +646,8 @@ def _targets(
             key=lambda x: x[1]["lineno"] if x[1]["lineno"] is not None else -1,
         )
     )
-
+    if names_only:
+        return list(out.keys())
     return out
 
 
@@ -637,17 +668,17 @@ def database(*args, **kwargs):
 
 def _database(makefile: str = "", make="make") -> typing.List[str]:
     """
-    Get database for Makefile (This output comes from 'make
-    --print-data-base') # FIXME: nix the temporary file and use
-    streams.
+    Get database for Makefile.
+
+    This output comes from 'make --print-data-base'
+
+    FIXME: nix the temporary file and use streams.
     """
     LOGGER.debug(f"building database for {makefile}")
     validate_makefile(makefile)
-    cmd = f"{make} --print-data-base -pqRrs -f {makefile} > .tmp.mk.db 2>/dev/null"
-    os.system(cmd)
-    with open(".tmp.mk.db") as fhandle:
-        out = fhandle.read().split("\n")
-    os.remove(".tmp.mk.db")
+    cmd = f"{make} --print-data-base -pqRrs -f {makefile}"
+    result = subprocess.run(cmd.split(), capture_output=True, text=True)
+    out = result.stdout.split("\n")
     return out
 
 

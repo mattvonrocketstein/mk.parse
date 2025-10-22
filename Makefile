@@ -15,7 +15,7 @@ docs.root=docs/
 
 py.src_root:=src
 img.ref=compose.mk:mkp
-img.official=ghcr.io/mattvonrocketstein/mk.parse:v1.2.4
+img.official=ghcr.io/mattvonrocketstein/mk.parse:latest
 # img.ref=`case $${GITHUB_ACTIONS:-false} in false) echo ${img.local};; *) echo ${img.official};; esac`
 dexec=docker run -v `pwd`:/workspace -w /workspace ${img.ref} $${args:-} 
 
@@ -29,9 +29,6 @@ clean: flux.stage/clean mk.clean py.clean docker.clean
 
 docker.clean:; force=1 ${make} docker.rmi/${img.official}
 	@# Clean project docker images
-
-mk.clean:; rm -f .tmp.*
-	@# Cleans `.tmp.*` files
 
 init: flux.stage/init mk.stat docker.stat pip.install/tox pip.install/uv
 	@# Project init. 

@@ -55,7 +55,7 @@ Run with docker:
 
 ```bash 
 docker run --rm -i -v `pwd`:/workspace -w/workspace \
-  ghcr.io/mattvonrocketstein/mk.parse:v1.2.4 targets Makefile
+  ghcr.io/mattvonrocketstein/mk.parse:latest targets Makefile
 ```
 
 ----------------------------------------
